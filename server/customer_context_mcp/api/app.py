@@ -9,7 +9,6 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -147,19 +146,6 @@ def api_draft(body: DraftBody) -> dict[str, Any]:
 
 
 if APP_DIST.is_dir():
-    app.mount(
-        "/assets",
-        StaticFiles(directory=str(APP_DIST / "assets")),
-        name="iframe-assets",
-    )
-
-    @app.get("/")
-    def index() -> FileResponse:
-        return FileResponse(APP_DIST / "index.html")
-
-    @app.get("/{path:path}")
-    def spa_fallback(path: str) -> FileResponse:
-        target = APP_DIST / path
-        if target.is_file():
-            return FileResponse(target)
-        return FileResponse(APP_DIST / "index.html")
+    # html=True makes StaticFiles fall back to index.html for unknown paths,
+    # and the StaticFiles handler refuses traversal outside the mounted directory.
+    app.mount("/", StaticFiles(directory=str(APP_DIST), html=True), name="iframe-app")
