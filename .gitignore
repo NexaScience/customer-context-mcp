@@ -216,3 +216,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Node / Vite (app/)
+app/node_modules/
+app/dist/
+app/.vite/
+*.tsbuildinfo
+# Python-style ignores upstream catch `lib/` etc. — re-include the iframe app source.
+!app/src/
+!app/src/**
+
+# Local env / secrets
+.env
+.env.local
+credentials.json
+token.json

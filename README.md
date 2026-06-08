@@ -1,0 +1,126 @@
+# Customer Context MCP — Meeting Prep Assistant
+
+An MCP server **and** an iframe MCP App that helps sales / CS / AM teams prepare for customer
+meetings. Pulls customer-related context from **Notion**, **Slack**, and **Google Drive**,
+analyses it with an LLM, and renders an evidence-backed customer brief in the iframe UI.
+
+The MCP server exposes 5 tools. The iframe MCP App is a React dashboard that mirrors those
+tools over HTTP so you can demo the experience end-to-end.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ Customer Meeting Brief    iframe MCP App                     │
+├──────────────────────────────────────────────────────────────┤
+│ Customer / Meeting / Sources / Last Updated                  │
+├───────────────────────────────┬──────────────────────────────┤
+│ Executive Summary             │ Ask about this customer       │
+│ Key Topics    |   Risks       │ Suggested Questions           │
+│ Opportunities | Actions       │ Evidence Drawer               │
+│ Recent Timeline               │                              │
+└───────────────────────────────┴──────────────────────────────┘
+```
+
+## Project layout
+
+```
+customer-context-mcp/
+├── server/                          Python MCP server + HTTP bridge
+│   ├── pyproject.toml
+│   └── customer_context_mcp/
+│       ├── server.py                MCP stdio server
+│       ├── api/app.py               FastAPI bridge (serves iframe + tools)
+│       ├── cli.py                   `customer-context-mcp {mcp,http}`
+│       ├── tools/                   search / brief / ask / evidence / draft
+│       ├── sources/                 Notion, Slack, Google Drive
+│       └── llm.py                   Anthropic-backed analysis
+├── app/                             iframe MCP App (Vite + React + Tailwind)
+│   └── src/
+│       ├── App.tsx
+│       └── components/              Header / Risks / EvidenceDrawer / …
+├── .env.example
+└── customer_context_mcp_meeting_prep_requirements.md
+```
+
+## MCP tools
+
+| Tool | Purpose |
+|---|---|
+| `search_customer_context` | Notion + Slack + Google Drive search; returns Evidence[] |
+| `generate_meeting_brief`  | Runs search, then LLM-structures a meeting brief |
+| `ask_meeting_brief`       | Evidence-grounded follow-up Q&A |
+| `get_evidence_detail`     | Returns one Evidence record by id |
+| `draft_customer_message`  | Drafts follow-up email / internal Slack summary / agenda |
+
+## Setup
+
+### 1. Credentials
+
+```bash
+cp .env.example .env
+# fill in ANTHROPIC_API_KEY, NOTION_TOKEN, SLACK_BOT_TOKEN
+# place Google Drive OAuth client at ./credentials.json
+```
+
+Required scopes:
+
+- **Notion**: integration with read access to relevant pages (share the integration with the pages you want searched).
+- **Slack** bot scopes: `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `mpim:history`, `search:read`, `users:read`.
+- **Google Drive**: OAuth 2.0 client of type *Desktop app*. The first run opens a browser to consent and writes `token.json`.
+
+### 2. Server
+
+```bash
+cd server
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+```
+
+### 3. App (iframe)
+
+```bash
+cd app
+npm install
+npm run build           # outputs to app/dist (served by the HTTP bridge)
+```
+
+## Run
+
+### iframe MCP App + HTTP bridge
+
+```bash
+customer-context-mcp http --host 127.0.0.1 --port 8787
+# open http://127.0.0.1:8787
+```
+
+For app development with HMR:
+
+```bash
+# terminal 1
+customer-context-mcp http
+# terminal 2
+cd app && npm run dev    # http://127.0.0.1:5173, proxies /api to :8787
+```
+
+### MCP stdio server (Claude Desktop / Claude Code)
+
+```jsonc
+// ~/.config/claude/claude_desktop_config.json or settings.json
+{
+  "mcpServers": {
+    "customer-context": {
+      "command": "customer-context-mcp",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+## Demo prompt
+
+```text
+A社との明日の商談に向けて、Notion、Slack、Google Driveの情報をもとに、
+状況・懸念点・確認すべき質問・提案すべき内容を整理してください。
+```
+
+The MCP host can call `generate_meeting_brief({customer_name: "A社", ...})`. The same data
+renders in the iframe MCP App dashboard at the URL above.
