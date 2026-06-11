@@ -1,8 +1,14 @@
-"""FastAPI HTTP bridge — exposes the same tools to the iframe MCP App and serves
-the built iframe (app/dist) as static files."""
+"""FastAPI app — hosts the Remote MCP endpoint and the iframe MCP App.
+
+Endpoints:
+  - /mcp/*  : MCP Streamable HTTP transport  (for Claude Desktop / Remote MCP)
+  - /api/*  : thin REST wrappers used by the iframe app
+  - /       : static files of the iframe app (built Vite output at ../app/dist)
+"""
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -13,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..config import CONFIG
+from ..server import mcp
 from ..store import STORE
 from ..tools import (
     ask_meeting_brief,
@@ -27,7 +34,14 @@ log = logging.getLogger(__name__)
 
 APP_DIST = Path(__file__).resolve().parents[3] / "app" / "dist"
 
-app = FastAPI(title="customer-context-mcp", version="0.1.0")
+
+@contextlib.asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    async with mcp.session_manager.run():
+        yield
+
+
+app = FastAPI(lifespan=_lifespan)
 
 
 _allowed = {
@@ -41,11 +55,17 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(_allowed),
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
+    expose_headers=["Mcp-Session-Id"],
 )
 
 
+# ---------- Remote MCP (Streamable HTTP) ----------
+app.mount("/mcp", mcp.streamable_http_app())
+
+
+# ---------- REST endpoints for the iframe ----------
 class SearchBody(BaseModel):
     customer_name: str
     customer_aliases: list[str] = Field(default_factory=list)
@@ -145,7 +165,6 @@ def api_draft(body: DraftBody) -> dict[str, Any]:
     return out
 
 
+# ---------- Iframe static files (must be mounted last so /api and /mcp win) ----------
 if APP_DIST.is_dir():
-    # html=True makes StaticFiles fall back to index.html for unknown paths,
-    # and the StaticFiles handler refuses traversal outside the mounted directory.
     app.mount("/", StaticFiles(directory=str(APP_DIST), html=True), name="iframe-app")

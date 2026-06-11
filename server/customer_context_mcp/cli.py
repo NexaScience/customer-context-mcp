@@ -1,9 +1,8 @@
-"""CLI entry point — choose stdio MCP server or HTTP bridge."""
+"""CLI entry point — stdio MCP server or HTTP (Remote MCP + iframe)."""
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 
 from .config import CONFIG
@@ -16,7 +15,7 @@ def main() -> None:
     p_mcp = sub.add_parser("mcp", help="Run MCP stdio server")
     p_mcp.set_defaults(func=_run_mcp)
 
-    p_http = sub.add_parser("http", help="Run FastAPI HTTP bridge")
+    p_http = sub.add_parser("http", help="Run HTTP server (Remote MCP + iframe)")
     p_http.add_argument("--host", default=CONFIG.host)
     p_http.add_argument("--port", type=int, default=CONFIG.port)
     p_http.add_argument("--reload", action="store_true")
@@ -28,9 +27,9 @@ def main() -> None:
 
 
 def _run_mcp(_args: argparse.Namespace) -> None:
-    from .server import run as run_mcp
+    from .server import mcp
 
-    asyncio.run(run_mcp())
+    mcp.run(transport="stdio")
 
 
 def _run_http(args: argparse.Namespace) -> None:

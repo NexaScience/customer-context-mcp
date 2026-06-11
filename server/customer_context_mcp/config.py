@@ -38,6 +38,9 @@ class Config:
     allowed_origins: tuple[str, ...] = tuple(
         o.strip() for o in (_env("ALLOWED_ORIGINS") or "").split(",") if o.strip()
     )
+    mcp_allowed_hosts: tuple[str, ...] = tuple(
+        h.strip() for h in (_env("MCP_ALLOWED_HOSTS") or "").split(",") if h.strip()
+    )
 
 
 CONFIG = Config()
