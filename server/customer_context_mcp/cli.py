@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 
 from .config import HTTP_HOST, HTTP_PORT
@@ -28,9 +27,9 @@ def main() -> None:
 
 
 def _run_mcp(_args: argparse.Namespace) -> None:
-    from .server import run as run_mcp
+    from .server import mcp
 
-    asyncio.run(run_mcp())
+    mcp.run()
 
 
 def _run_http(args: argparse.Namespace) -> None:

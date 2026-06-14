@@ -1,9 +1,15 @@
-"""FastAPI HTTP bridge — exposes the same tools to the iframe MCP App and serves
-the built iframe (app/dist) as static files."""
+"""FastAPI app — hosts the Remote MCP endpoint and the iframe MCP App.
+
+Endpoints:
+  - /mcp/*  : MCP Streamable HTTP transport  (Claude Desktop / Remote MCP clients)
+  - /api/*  : thin REST wrappers used by the iframe app
+  - /       : built iframe (Vite output at ../app/dist), served statically
+"""
 
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from ..config import CONFIG, GOOGLE_CREDENTIALS_FILE, HTTP_PORT
+from ..server import mcp
 from ..store import STORE
 from ..tools import (
     ask_meeting_brief,
@@ -27,7 +34,21 @@ log = logging.getLogger(__name__)
 
 APP_DIST = Path(__file__).resolve().parents[3] / "app" / "dist"
 
-app = FastAPI(title="customer-context-mcp", version="0.1.0")
+# Build the FastMCP Streamable HTTP ASGI app. ``path="/"`` so that, after mounting
+# at "/mcp", the final URL is "/mcp/" (which is what MCP clients POST to).
+_mcp_app = mcp.http_app(path="/")
+
+
+@asynccontextmanager
+async def _lifespan(parent: FastAPI):
+    # FastMCP's StreamableHTTPSessionManager is initialised inside the mounted
+    # app's lifespan. Propagating it from the parent is mandatory — without this
+    # POST /mcp/ returns 500 ("task group was not initialized").
+    async with _mcp_app.lifespan(parent):
+        yield
+
+
+app = FastAPI(title="customer-context-mcp", version="0.1.0", lifespan=_lifespan)
 
 
 _allowed = sorted({
@@ -40,9 +61,14 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
+    expose_headers=["Mcp-Session-Id"],
 )
+
+
+# Remote MCP (Streamable HTTP) endpoint
+app.mount("/mcp", _mcp_app)
 
 
 class SearchBody(BaseModel):
