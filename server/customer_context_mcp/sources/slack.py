@@ -29,9 +29,6 @@ def _build_query(customer_name: str, aliases: list[str], period: Period) -> str:
     cutoff = period_to_cutoff(period)
     if cutoff:
         parts.append(f"after:{cutoff.strftime('%Y-%m-%d')}")
-    if CONFIG.slack_channels:
-        chan_clause = " ".join(f"in:{c.lstrip('#')}" for c in CONFIG.slack_channels)
-        parts.append(chan_clause)
     return " ".join(parts)
 
 

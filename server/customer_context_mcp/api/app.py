@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from ..config import CONFIG
+from ..config import CONFIG, GOOGLE_CREDENTIALS_FILE, HTTP_PORT
 from ..store import STORE
 from ..tools import (
     ask_meeting_brief,
@@ -30,16 +30,15 @@ APP_DIST = Path(__file__).resolve().parents[3] / "app" / "dist"
 app = FastAPI(title="customer-context-mcp", version="0.1.0")
 
 
-_allowed = {
-    f"http://127.0.0.1:{CONFIG.port}",
-    f"http://localhost:{CONFIG.port}",
+_allowed = sorted({
+    f"http://127.0.0.1:{HTTP_PORT}",
+    f"http://localhost:{HTTP_PORT}",
     "http://127.0.0.1:5173",
     "http://localhost:5173",
-}
-_allowed.update(CONFIG.allowed_origins)
+})
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=sorted(_allowed),
+    allow_origins=_allowed,
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
@@ -79,7 +78,7 @@ def health() -> dict[str, Any]:
         "anthropic": bool(CONFIG.anthropic_api_key),
         "notion": bool(CONFIG.notion_token),
         "slack": bool(CONFIG.slack_bot_token),
-        "google_drive": Path(CONFIG.google_credentials_file).exists(),
+        "google_drive": Path(GOOGLE_CREDENTIALS_FILE).exists(),
     }
 
 
