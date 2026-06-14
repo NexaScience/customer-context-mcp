@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from .config import CONFIG
+from .config import ANTHROPIC_MODEL, CONFIG
 from .types import Evidence
 
 log = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ def generate_brief_json(
         f"Return JSON with this shape:\n{json.dumps(BRIEF_SCHEMA_HINT, indent=2)}"
     )
     msg = client.messages.create(
-        model=CONFIG.anthropic_model,
+        model=ANTHROPIC_MODEL,
         max_tokens=4000,
         system=BRIEF_SYSTEM,
         messages=[{"role": "user", "content": user}],
@@ -112,7 +112,7 @@ def answer_question(question: str, brief_json: dict[str, Any], evidence: list[Ev
         f"Question: {question}"
     )
     msg = client.messages.create(
-        model=CONFIG.anthropic_model,
+        model=ANTHROPIC_MODEL,
         max_tokens=1024,
         system=QA_SYSTEM,
         messages=[{"role": "user", "content": user}],
@@ -159,7 +159,7 @@ def draft_message(
         f"Evidence:\n{_evidence_block(evidence)}"
     )
     msg = client.messages.create(
-        model=CONFIG.anthropic_model,
+        model=ANTHROPIC_MODEL,
         max_tokens=1500,
         system=DRAFT_SYSTEM,
         messages=[{"role": "user", "content": user}],

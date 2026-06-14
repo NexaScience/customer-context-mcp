@@ -6,7 +6,7 @@ import logging
 import os
 from typing import Optional
 
-from ..config import CONFIG
+from ..config import GOOGLE_CREDENTIALS_FILE, GOOGLE_TOKEN_FILE
 from ..types import Evidence, Period
 from .base import SourceUnavailable, period_to_cutoff, shorten
 
@@ -24,8 +24,8 @@ def _credentials():
         raise SourceUnavailable(f"google libraries not installed: {e}") from e
 
     creds: Optional["Credentials"] = None
-    token_path = CONFIG.google_token_file
-    creds_path = CONFIG.google_credentials_file
+    token_path = GOOGLE_TOKEN_FILE
+    creds_path = GOOGLE_CREDENTIALS_FILE
 
     if os.path.exists(token_path):
         creds = Credentials.from_authorized_user_file(token_path, SCOPES)
@@ -36,7 +36,7 @@ def _credentials():
         else:
             if not os.path.exists(creds_path):
                 raise SourceUnavailable(
-                    f"GOOGLE_CREDENTIALS_FILE not found at {creds_path}. "
+                    f"Google OAuth credentials not found at {creds_path}. "
                     "Download OAuth client (Desktop) credentials and place them there."
                 )
             flow = InstalledAppFlow.from_client_secrets_file(creds_path, SCOPES)
