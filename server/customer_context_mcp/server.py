@@ -1,166 +1,124 @@
-"""MCP stdio server exposing the 5 tools."""
+"""FastMCP server exposing the 5 customer-context tools.
+
+The same ``mcp`` instance powers both transports:
+  - stdio  : ``customer-context-mcp mcp``         (local Claude Desktop / Code)
+  - HTTP   : mounted at ``/mcp`` by ``api/app.py`` (Remote MCP)
+"""
 
 from __future__ import annotations
 
 import json
-import logging
-from typing import Any
+from typing import Iterable
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from fastmcp import FastMCP
 
 from .tools import (
-    ask_meeting_brief,
-    draft_customer_message,
-    generate_meeting_brief,
-    get_evidence_detail,
-    search_customer_context,
+    ask_meeting_brief as _ask,
+    draft_customer_message as _draft,
+    generate_meeting_brief as _brief,
+    get_evidence_detail as _evidence,
+    search_customer_context as _search,
 )
+from .types import Period, Source
 
-log = logging.getLogger(__name__)
-
-server = Server("customer-context-mcp")
-
-
-TOOLS: list[Tool] = [
-    Tool(
-        name="search_customer_context",
-        description=(
-            "Search Notion, Slack, and Google Drive for customer-related items. "
-            "Returns a list of Evidence objects sorted newest first."
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "customer_name": {"type": "string"},
-                "customer_aliases": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "default": [],
-                },
-                "period": {
-                    "type": "string",
-                    "enum": ["7d", "30d", "90d", "all"],
-                    "default": "30d",
-                },
-                "sources": {
-                    "type": "array",
-                    "items": {"enum": ["notion", "slack", "google_drive"]},
-                    "default": ["notion", "slack", "google_drive"],
-                },
-            },
-            "required": ["customer_name"],
-        },
-    ),
-    Tool(
-        name="generate_meeting_brief",
-        description=(
-            "Run search_customer_context, then use the LLM to produce a structured "
-            "customer meeting brief (summary, key topics, risks, opportunities, "
-            "suggested questions, recommended actions, timeline, evidence)."
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "customer_name": {"type": "string"},
-                "customer_aliases": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "default": [],
-                },
-                "meeting_date": {"type": "string"},
-                "objective": {"type": "string"},
-                "period": {
-                    "type": "string",
-                    "enum": ["7d", "30d", "90d", "all"],
-                    "default": "30d",
-                },
-            },
-            "required": ["customer_name"],
-        },
-    ),
-    Tool(
-        name="ask_meeting_brief",
-        description=(
-            "Answer a follow-up question grounded in a previously generated brief and "
-            "its evidence."
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "brief_id": {"type": "string"},
-                "question": {"type": "string"},
-                "evidence_scope": {
-                    "type": "array",
-                    "items": {"enum": ["notion", "slack", "google_drive"]},
-                },
-            },
-            "required": ["brief_id", "question"],
-        },
-    ),
-    Tool(
-        name="get_evidence_detail",
-        description="Return the full Evidence record for an evidence_id.",
-        inputSchema={
-            "type": "object",
-            "properties": {"evidence_id": {"type": "string"}},
-            "required": ["evidence_id"],
-        },
-    ),
-    Tool(
-        name="draft_customer_message",
-        description=(
-            "Draft a follow-up email, internal Slack summary, or meeting agenda based "
-            "on the brief."
-        ),
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "brief_id": {"type": "string"},
-                "purpose": {
-                    "enum": [
-                        "follow_up_email",
-                        "internal_slack_summary",
-                        "meeting_agenda",
-                    ]
-                },
-            },
-            "required": ["brief_id", "purpose"],
-        },
-    ),
-]
+mcp = FastMCP("customer-context-mcp")
 
 
-@server.list_tools()
-async def _list_tools() -> list[Tool]:
-    return TOOLS
+def _dump(result: dict) -> str:
+    return json.dumps(result, ensure_ascii=False, default=str, indent=2)
 
 
-@server.call_tool()
-async def _call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
-    arguments = arguments or {}
-    try:
-        if name == "search_customer_context":
-            result = search_customer_context(**arguments)
-        elif name == "generate_meeting_brief":
-            result = generate_meeting_brief(**arguments)
-        elif name == "ask_meeting_brief":
-            result = ask_meeting_brief(**arguments)
-        elif name == "get_evidence_detail":
-            result = get_evidence_detail(**arguments)
-        elif name == "draft_customer_message":
-            result = draft_customer_message(**arguments)
-        else:
-            result = {"error": f"unknown tool: {name}"}
-    except TypeError as e:
-        result = {"error": f"invalid arguments: {e}"}
-    except Exception as e:  # noqa: BLE001
-        log.exception("tool %s failed", name)
-        result = {"error": f"{type(e).__name__}: {e}"}
-    return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, default=str))]
+@mcp.tool()
+def search_customer_context(
+    customer_name: str,
+    customer_aliases: list[str] | None = None,
+    period: Period = "30d",
+    sources: Iterable[Source] | None = None,
+) -> str:
+    """Search Notion, Slack, and Google Drive for items related to a customer.
+
+    Args:
+        customer_name: The customer / company name to search for.
+        customer_aliases: Optional alternative names (e.g. JP/EN, parent company).
+        period: Lookback window — one of "7d", "30d", "90d", "all".
+        sources: Subset of sources to query. Defaults to all three.
+    """
+    return _dump(
+        _search(
+            customer_name=customer_name,
+            customer_aliases=customer_aliases,
+            period=period,
+            sources=sources,
+        )
+    )
 
 
-async def run() -> None:
-    async with stdio_server() as (read, write):
-        await server.run(read, write, server.create_initialization_options())
+@mcp.tool()
+def generate_meeting_brief(
+    customer_name: str,
+    customer_aliases: list[str] | None = None,
+    meeting_date: str | None = None,
+    objective: str | None = None,
+    period: Period = "30d",
+) -> str:
+    """Run search_customer_context and produce a structured meeting brief via LLM.
+
+    Args:
+        customer_name: The customer / company name.
+        customer_aliases: Optional alternative names.
+        meeting_date: Upcoming meeting date (free-form string, e.g. "2026-06-20").
+        objective: What the meeting is for (e.g. "renewal discussion").
+        period: Lookback window for the underlying search.
+    """
+    return _dump(
+        _brief(
+            customer_name=customer_name,
+            customer_aliases=customer_aliases,
+            meeting_date=meeting_date,
+            objective=objective,
+            period=period,
+        )
+    )
+
+
+@mcp.tool()
+def ask_meeting_brief(
+    brief_id: str,
+    question: str,
+    evidence_scope: list[Source] | None = None,
+) -> str:
+    """Ask a follow-up question grounded in a previously generated brief.
+
+    Args:
+        brief_id: ID returned by ``generate_meeting_brief``.
+        question: The follow-up question.
+        evidence_scope: Optional subset of sources to restrict the evidence to.
+    """
+    return _dump(
+        _ask(
+            brief_id=brief_id,
+            question=question,
+            evidence_scope=evidence_scope,
+        )
+    )
+
+
+@mcp.tool()
+def get_evidence_detail(evidence_id: str) -> str:
+    """Return the full Evidence record for an ``evidence_id``.
+
+    Args:
+        evidence_id: The evidence id as returned in a brief or search result.
+    """
+    return _dump(_evidence(evidence_id))
+
+
+@mcp.tool()
+def draft_customer_message(brief_id: str, purpose: str) -> str:
+    """Draft a follow-up email, internal Slack summary, or meeting agenda.
+
+    Args:
+        brief_id: ID returned by ``generate_meeting_brief``.
+        purpose: One of "follow_up_email", "internal_slack_summary", "meeting_agenda".
+    """
+    return _dump(_draft(brief_id=brief_id, purpose=purpose))
