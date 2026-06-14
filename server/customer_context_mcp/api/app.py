@@ -25,7 +25,18 @@ from ..types import Period, Source
 
 log = logging.getLogger(__name__)
 
-APP_DIST = Path(__file__).resolve().parents[3] / "app" / "dist"
+def _resolve_app_dist() -> Path:
+    # Repo layout (dev): server/customer_context_mcp/api/app.py → <repo>/app/dist
+    repo_layout = Path(__file__).resolve().parents[3] / "app" / "dist"
+    # Container layout (see Dockerfile): /app/dist is placed beside the installed package
+    container_layout = Path("/app/dist")
+    for candidate in (repo_layout, container_layout):
+        if candidate.is_dir():
+            return candidate
+    return repo_layout
+
+
+APP_DIST = _resolve_app_dist()
 
 app = FastAPI(title="customer-context-mcp", version="0.1.0")
 
