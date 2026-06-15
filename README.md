@@ -89,11 +89,23 @@ Required scopes:
 
 ### 2. Server
 
+Python dependencies are managed with [uv](https://docs.astral.sh/uv/) and
+pinned in `server/uv.lock`. Install it once with
+`curl -LsSf https://astral.sh/uv/install.sh | sh`.
+
 ```bash
 cd server
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+uv sync            # creates .venv and installs from uv.lock
 ```
+
+Subsequent commands use `uv run` so the project venv is picked up
+automatically:
+
+```bash
+uv run customer-context-mcp --help
+```
+
+If you prefer a sourced venv: `source .venv/bin/activate`.
 
 ### 3. App (iframe)
 
@@ -108,7 +120,8 @@ npm run build           # outputs to app/dist (served by the HTTP bridge)
 ### iframe MCP App + HTTP bridge
 
 ```bash
-customer-context-mcp http --host 127.0.0.1 --port 8787
+cd server
+uv run customer-context-mcp http --host 127.0.0.1 --port 8787
 # open http://127.0.0.1:8787
 ```
 
@@ -116,7 +129,7 @@ For app development with HMR:
 
 ```bash
 # terminal 1
-customer-context-mcp http
+cd server && uv run customer-context-mcp http
 # terminal 2
 cd app && npm run dev    # http://127.0.0.1:5173, proxies /api to :8787
 ```
@@ -128,8 +141,14 @@ cd app && npm run dev    # http://127.0.0.1:5173, proxies /api to :8787
 {
   "mcpServers": {
     "customer-context": {
-      "command": "customer-context-mcp",
-      "args": ["mcp"]
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/customer-context-mcp/server",
+        "run",
+        "customer-context-mcp",
+        "mcp"
+      ]
     }
   }
 }
