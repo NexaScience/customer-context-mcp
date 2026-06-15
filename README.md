@@ -56,9 +56,9 @@ customer-context-mcp/
 `generate_meeting_brief` returns two content items:
 
 1. A `TextContent` with the brief as JSON.
-2. An `EmbeddedResource` following the [mcp-ui](https://mcpui.dev) convention —
-   URI `ui://customer-context-mcp/meeting-brief/<id>`, MIME type
-   `text/html;profile=mcp-app`, containing a self-contained HTML dashboard
+2. A `UIResource` built via the [mcp-ui](https://mcpui.dev) Python SDK
+   (`mcp-ui-server`) — URI `ui://customer-context-mcp/meeting-brief/<id>`,
+   MIME type `text/html`, containing a self-contained HTML dashboard
    (executive summary, risks, opportunities, suggested questions, recommended
    actions, timeline, evidence).
 
@@ -68,8 +68,9 @@ fully static — no network calls, no external assets — so it works in any
 sandboxed iframe without further configuration.
 
 Implementation lives in [`server/customer_context_mcp/ui_app.py`](server/customer_context_mcp/ui_app.py)
-and uses only `mcp.types.EmbeddedResource` + `TextResourceContents` (no
-additional dependency).
+and calls `mcp_ui_server.create_ui_resource()` so the wire-level shape
+(URI scheme, MIME type, and `mcpui.dev/ui-*` metadata prefix) tracks the
+upstream mcp-ui spec automatically.
 
 ## Setup
 
