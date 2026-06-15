@@ -11,8 +11,10 @@ import json
 from typing import Iterable
 
 from fastmcp import FastMCP
+from fastmcp.apps.config import AppConfig, ResourceCSP
+from fastmcp.tools.tool import ToolResult
+from fastmcp.utilities.mime import UI_MIME_TYPE
 from mcp.types import TextContent
-from mcp_ui_server.core import UIResource
 
 from .tools import (
     ask_meeting_brief as _ask,
@@ -23,8 +25,37 @@ from .tools import (
 )
 from .types import Period, Source
 from .ui_app import build_brief_ui_resource
+from .widget import WIDGET_URI, render_brief_widget_html
 
 mcp = FastMCP("customer-context-mcp")
+
+
+# ---------------------------------------------------------------------------
+# MCP App resource — the iframe shell rendered by ChatGPT Apps and any other
+# mcp-apps-aware host. The brief data arrives at run-time as the tool's
+# structured_content via a ``ui/notifications/tool-result`` postMessage; this
+# resource holds only the HTML shell + JS listener.
+# ---------------------------------------------------------------------------
+
+
+@mcp.resource(
+    WIDGET_URI,
+    name="customer-context-meeting-brief-widget",
+    description="Iframe shell that renders the meeting brief dashboard.",
+    mime_type=UI_MIME_TYPE,
+    app=AppConfig(
+        # The widget has no remote subresources, no outbound fetch, and no
+        # nested iframes — the CSP locks the iframe down accordingly.
+        csp=ResourceCSP(
+            connect_domains=[],
+            resource_domains=[],
+            frame_domains=[],
+        ),
+        prefers_border=True,
+    ),
+)
+def meeting_brief_widget() -> str:
+    return render_brief_widget_html()
 
 
 def _dump(result: dict) -> str:
@@ -56,22 +87,34 @@ def search_customer_context(
     )
 
 
-@mcp.tool()
+@mcp.tool(
+    # MCP Apps extension — advertises the iframe shell registered above.
+    # FastMCP serialises this into _meta.ui.resourceUri (the standard key)
+    # and ChatGPT Apps also honours _meta["openai/outputTemplate"] as an
+    # OpenAI-specific compatibility alias for the same URI.
+    app=AppConfig(resource_uri=WIDGET_URI),
+    meta={"openai/outputTemplate": WIDGET_URI},
+)
 def generate_meeting_brief(
     customer_name: str,
     customer_aliases: list[str] | None = None,
     meeting_date: str | None = None,
     objective: str | None = None,
     period: Period = "30d",
-) -> list[TextContent | UIResource]:
+) -> ToolResult:
     """Run search_customer_context and produce a structured meeting brief via LLM.
 
-    Returns two content items:
-      1. ``TextContent`` — the brief as JSON (unchanged from previous behaviour).
-      2. ``UIResource`` — a self-contained HTML dashboard wrapped as an MCP
-         App (``ui://`` URI, ``text/html`` MIME) via mcp-ui-server. Hosts that
-         support mcp-ui render it inline as a sandboxed iframe; other hosts
-         surface it as a normal embedded resource alongside the JSON.
+    The tool result carries three payloads so both MCP Apps (ChatGPT) and the
+    legacy mcp-ui inline pattern (Claude / mcp-ui-aware hosts) can render the
+    same brief:
+
+    - ``structured_content`` — the brief as a JSON object. ChatGPT delivers
+      this to the iframe at run-time via ``ui/notifications/tool-result``.
+    - ``content[0]`` (``TextContent``) — the same brief as a JSON string for
+      hosts that read tool output as text.
+    - ``content[1]`` (``UIResource``) — a fully self-contained HTML
+      dashboard for mcp-ui clients that render inline ``ui://`` resources
+      (no postMessage needed).
 
     Args:
         customer_name: The customer / company name.
@@ -87,10 +130,13 @@ def generate_meeting_brief(
         objective=objective,
         period=period,
     )
-    return [
-        TextContent(type="text", text=_dump(brief)),
-        build_brief_ui_resource(brief),
-    ]
+    return ToolResult(
+        content=[
+            TextContent(type="text", text=_dump(brief)),
+            build_brief_ui_resource(brief),
+        ],
+        structured_content=brief,
+    )
 
 
 @mcp.tool()

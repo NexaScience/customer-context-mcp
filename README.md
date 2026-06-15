@@ -53,24 +53,42 @@ customer-context-mcp/
 
 ## MCP Apps (inline iframe)
 
-`generate_meeting_brief` returns two content items:
+`generate_meeting_brief` carries **three** payloads so both major MCP-App
+regulations render the same brief:
 
-1. A `TextContent` with the brief as JSON.
-2. A `UIResource` built via the [mcp-ui](https://mcpui.dev) Python SDK
-   (`mcp-ui-server`) — URI `ui://customer-context-mcp/meeting-brief/<id>`,
-   MIME type `text/html`, containing a self-contained HTML dashboard
-   (executive summary, risks, opportunities, suggested questions, recommended
-   actions, timeline, evidence).
+| Payload | Consumer | Shape |
+|---|---|---|
+| `structured_content` | **ChatGPT Apps** — delivered to the registered widget iframe at run-time via `ui/notifications/tool-result` postMessage | brief JSON |
+| `content[0]` (`TextContent`) | Plain MCP clients (no UI rendering) | brief JSON as text |
+| `content[1]` (`UIResource`) | **mcp-ui-aware hosts** that render inline `ui://` resources | self-contained HTML dashboard |
 
-mcp-ui-aware hosts render this inline as a sandboxed iframe; other MCP hosts
-expose it as a regular embedded resource alongside the JSON. The HTML is
-fully static — no network calls, no external assets — so it works in any
-sandboxed iframe without further configuration.
+The tool also declares the widget on its `_meta`:
 
-Implementation lives in [`server/customer_context_mcp/ui_app.py`](server/customer_context_mcp/ui_app.py)
-and calls `mcp_ui_server.create_ui_resource()` so the wire-level shape
-(URI scheme, MIME type, and `mcpui.dev/ui-*` metadata prefix) tracks the
-upstream mcp-ui spec automatically.
+```jsonc
+{
+  "ui": {"resourceUri": "ui://customer-context-mcp/meeting-brief.html"},
+  "openai/outputTemplate": "ui://customer-context-mcp/meeting-brief.html"
+}
+```
+
+…and registers the widget itself as an MCP Resource with MIME
+`text/html;profile=mcp-app`. The widget HTML is a static JS shell that
+listens for the `ui/notifications/tool-result` postMessage from the host
+and renders the brief from `structuredContent`.
+
+| Host | Render path |
+|---|---|
+| **ChatGPT Apps** | Reads `_meta.ui.resourceUri` → fetches the registered `ui://…meeting-brief.html` resource → renders iframe → delivers `structuredContent` via postMessage → JS shell paints the dashboard |
+| **mcp-ui hosts** (e.g. mcp-ui inspector, Claude with mcp-ui) | Sees `content[1]` `UIResource` (already-rendered HTML) inline in the tool result |
+| **Plain MCP clients** | Sees `content[0]` `TextContent` JSON as plain output |
+
+### Implementation map
+
+| File | Role |
+|---|---|
+| [`server/customer_context_mcp/widget.py`](server/customer_context_mcp/widget.py) | Iframe shell HTML + JS `postMessage` listener for ChatGPT Apps |
+| [`server/customer_context_mcp/ui_app.py`](server/customer_context_mcp/ui_app.py) | Server-side renderer that produces the inline `UIResource` for mcp-ui hosts (via `mcp_ui_server.create_ui_resource`) |
+| [`server/customer_context_mcp/server.py`](server/customer_context_mcp/server.py) | Tool / resource registration via FastMCP's `AppConfig`, `UI_MIME_TYPE`, and `ToolResult` |
 
 ## Setup
 
