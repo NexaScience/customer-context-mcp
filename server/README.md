@@ -4,11 +4,12 @@ MCP server + HTTP bridge for the Customer Context Meeting Prep Assistant.
 
 ## Install
 
+Dependencies are managed with [uv](https://docs.astral.sh/uv/) and pinned in
+`uv.lock`.
+
 ```bash
 cd server
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+uv sync
 ```
 
 ## Run
@@ -16,13 +17,13 @@ pip install -e .
 HTTP API + serves the iframe app statically (production build expected at `../app/dist`):
 
 ```bash
-customer-context-mcp http --host 127.0.0.1 --port 8787
+uv run customer-context-mcp http --host 127.0.0.1 --port 8787
 ```
 
 MCP stdio server (for Claude Desktop / Claude Code):
 
 ```bash
-customer-context-mcp mcp
+uv run customer-context-mcp mcp
 ```
 
 ## Environment

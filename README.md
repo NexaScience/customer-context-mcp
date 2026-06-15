@@ -46,10 +46,30 @@ customer-context-mcp/
 | Tool | Purpose |
 |---|---|
 | `search_customer_context` | Notion + Slack + Google Drive search; returns Evidence[] |
-| `generate_meeting_brief`  | Runs search, then LLM-structures a meeting brief |
+| `generate_meeting_brief`  | Runs search, then LLM-structures a meeting brief. Returns JSON **and** an MCP App (see below) |
 | `ask_meeting_brief`       | Evidence-grounded follow-up Q&A |
 | `get_evidence_detail`     | Returns one Evidence record by id |
 | `draft_customer_message`  | Drafts follow-up email / internal Slack summary / agenda |
+
+## MCP Apps (inline iframe)
+
+`generate_meeting_brief` returns two content items:
+
+1. A `TextContent` with the brief as JSON.
+2. An `EmbeddedResource` following the [mcp-ui](https://mcpui.dev) convention —
+   URI `ui://customer-context-mcp/meeting-brief/<id>`, MIME type
+   `text/html;profile=mcp-app`, containing a self-contained HTML dashboard
+   (executive summary, risks, opportunities, suggested questions, recommended
+   actions, timeline, evidence).
+
+mcp-ui-aware hosts render this inline as a sandboxed iframe; other MCP hosts
+expose it as a regular embedded resource alongside the JSON. The HTML is
+fully static — no network calls, no external assets — so it works in any
+sandboxed iframe without further configuration.
+
+Implementation lives in [`server/customer_context_mcp/ui_app.py`](server/customer_context_mcp/ui_app.py)
+and uses only `mcp.types.EmbeddedResource` + `TextResourceContents` (no
+additional dependency).
 
 ## Setup
 
@@ -69,11 +89,23 @@ Required scopes:
 
 ### 2. Server
 
+Python dependencies are managed with [uv](https://docs.astral.sh/uv/) and
+pinned in `server/uv.lock`. Install it once with
+`curl -LsSf https://astral.sh/uv/install.sh | sh`.
+
 ```bash
 cd server
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+uv sync            # creates .venv and installs from uv.lock
 ```
+
+Subsequent commands use `uv run` so the project venv is picked up
+automatically:
+
+```bash
+uv run customer-context-mcp --help
+```
+
+If you prefer a sourced venv: `source .venv/bin/activate`.
 
 ### 3. App (iframe)
 
@@ -88,7 +120,8 @@ npm run build           # outputs to app/dist (served by the HTTP bridge)
 ### iframe MCP App + HTTP bridge
 
 ```bash
-customer-context-mcp http --host 127.0.0.1 --port 8787
+cd server
+uv run customer-context-mcp http --host 127.0.0.1 --port 8787
 # open http://127.0.0.1:8787
 ```
 
@@ -96,7 +129,7 @@ For app development with HMR:
 
 ```bash
 # terminal 1
-customer-context-mcp http
+cd server && uv run customer-context-mcp http
 # terminal 2
 cd app && npm run dev    # http://127.0.0.1:5173, proxies /api to :8787
 ```
@@ -108,8 +141,14 @@ cd app && npm run dev    # http://127.0.0.1:5173, proxies /api to :8787
 {
   "mcpServers": {
     "customer-context": {
-      "command": "customer-context-mcp",
-      "args": ["mcp"]
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/absolute/path/to/customer-context-mcp/server",
+        "run",
+        "customer-context-mcp",
+        "mcp"
+      ]
     }
   }
 }

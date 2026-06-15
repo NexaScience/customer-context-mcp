@@ -11,6 +11,7 @@ import json
 from typing import Iterable
 
 from fastmcp import FastMCP
+from mcp.types import EmbeddedResource, TextContent
 
 from .tools import (
     ask_meeting_brief as _ask,
@@ -20,6 +21,7 @@ from .tools import (
     search_customer_context as _search,
 )
 from .types import Period, Source
+from .ui_app import build_brief_ui_resource
 
 mcp = FastMCP("customer-context-mcp")
 
@@ -60,8 +62,15 @@ def generate_meeting_brief(
     meeting_date: str | None = None,
     objective: str | None = None,
     period: Period = "30d",
-) -> str:
+) -> list[TextContent | EmbeddedResource]:
     """Run search_customer_context and produce a structured meeting brief via LLM.
+
+    Returns two content items:
+      1. ``TextContent`` — the brief as JSON (unchanged from previous behaviour).
+      2. ``EmbeddedResource`` — a self-contained HTML dashboard wrapped as an
+         MCP App (``ui://`` URI, ``text/html;profile=mcp-app`` MIME). Hosts that
+         support mcp-ui render it inline as an iframe; other hosts surface it
+         as a normal embedded resource alongside the JSON.
 
     Args:
         customer_name: The customer / company name.
@@ -70,15 +79,17 @@ def generate_meeting_brief(
         objective: What the meeting is for (e.g. "renewal discussion").
         period: Lookback window for the underlying search.
     """
-    return _dump(
-        _brief(
-            customer_name=customer_name,
-            customer_aliases=customer_aliases,
-            meeting_date=meeting_date,
-            objective=objective,
-            period=period,
-        )
+    brief = _brief(
+        customer_name=customer_name,
+        customer_aliases=customer_aliases,
+        meeting_date=meeting_date,
+        objective=objective,
+        period=period,
     )
+    return [
+        TextContent(type="text", text=_dump(brief)),
+        build_brief_ui_resource(brief),
+    ]
 
 
 @mcp.tool()
