@@ -46,10 +46,30 @@ customer-context-mcp/
 | Tool | Purpose |
 |---|---|
 | `search_customer_context` | Notion + Slack + Google Drive search; returns Evidence[] |
-| `generate_meeting_brief`  | Runs search, then LLM-structures a meeting brief |
+| `generate_meeting_brief`  | Runs search, then LLM-structures a meeting brief. Returns JSON **and** an MCP App (see below) |
 | `ask_meeting_brief`       | Evidence-grounded follow-up Q&A |
 | `get_evidence_detail`     | Returns one Evidence record by id |
 | `draft_customer_message`  | Drafts follow-up email / internal Slack summary / agenda |
+
+## MCP Apps (inline iframe)
+
+`generate_meeting_brief` returns two content items:
+
+1. A `TextContent` with the brief as JSON.
+2. An `EmbeddedResource` following the [mcp-ui](https://mcpui.dev) convention —
+   URI `ui://customer-context-mcp/meeting-brief/<id>`, MIME type
+   `text/html;profile=mcp-app`, containing a self-contained HTML dashboard
+   (executive summary, risks, opportunities, suggested questions, recommended
+   actions, timeline, evidence).
+
+mcp-ui-aware hosts render this inline as a sandboxed iframe; other MCP hosts
+expose it as a regular embedded resource alongside the JSON. The HTML is
+fully static — no network calls, no external assets — so it works in any
+sandboxed iframe without further configuration.
+
+Implementation lives in [`server/customer_context_mcp/ui_app.py`](server/customer_context_mcp/ui_app.py)
+and uses only `mcp.types.EmbeddedResource` + `TextResourceContents` (no
+additional dependency).
 
 ## Setup
 
