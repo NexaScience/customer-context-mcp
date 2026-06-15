@@ -1,9 +1,11 @@
 """MCP Apps renderer for the meeting brief.
 
-Produces a self-contained HTML document and wraps it in an ``EmbeddedResource``
-following the mcp-ui convention (``ui://`` URI + ``text/html;profile=mcp-app``
-MIME type). Hosts that recognise MCP Apps render this inline as an iframe;
-hosts that don't still see the standard MCP embedded-resource content item.
+Produces a self-contained HTML document and wraps it via mcp-ui-server's
+``create_ui_resource`` so the wire-level shape (URI scheme, MIME type, and
+metadata prefix) tracks the upstream spec automatically. mcp-ui-aware hosts
+render the returned ``UIResource`` (which subclasses ``EmbeddedResource``)
+inline as a sandboxed iframe; other MCP hosts surface it as a regular
+embedded resource alongside the JSON content.
 
 The HTML is fully static — no network calls, no external assets, no JS
 frameworks — so the brief is visible inside whichever sandboxed iframe the
@@ -16,14 +18,8 @@ import html
 from typing import Any
 from urllib.parse import urlparse
 
-from mcp.types import EmbeddedResource, TextResourceContents
-from pydantic import AnyUrl
-
-# mcp-ui convention — see https://mcpui.dev. These two constants are the entire
-# wire-level contract for "MCP Apps" beyond what mcp.types already provides.
-MCP_APP_MIME_TYPE = "text/html;profile=mcp-app"
-MCP_APP_URI_PREFIX = "ui://"
-_UI_METADATA_PREFIX = "mcpui.dev/ui-"
+from mcp_ui_server import UIMetadataKey, create_ui_resource
+from mcp_ui_server.core import UIResource
 
 
 _SOURCE_LABEL = {
@@ -349,19 +345,24 @@ def render_brief_html(brief: dict) -> str:
     )
 
 
-def build_brief_ui_resource(brief: dict) -> EmbeddedResource:
-    """Wrap the rendered HTML as an mcp-ui-compatible EmbeddedResource.
+def build_brief_ui_resource(brief: dict) -> UIResource:
+    """Wrap the rendered HTML as an mcp-ui UIResource (rawHtml, text encoding).
 
-    The MCP host receives an ``EmbeddedResource`` content item whose ``uri``
-    starts with ``ui://`` and whose ``mimeType`` is ``text/html;profile=mcp-app``;
+    ``UIResource`` is a subclass of ``mcp.types.EmbeddedResource``, so this can
+    be returned from a FastMCP tool directly alongside ``TextContent``.
     mcp-ui-aware hosts render the HTML as a sandboxed iframe inline with the
-    chat. Other hosts simply expose it as a normal embedded resource.
+    chat. Other MCP hosts surface it as a regular embedded resource.
     """
-    uri = f"{MCP_APP_URI_PREFIX}customer-context-mcp/meeting-brief/{brief.get('id', 'unknown')}"
-    resource = TextResourceContents(
-        uri=AnyUrl(uri),
-        mimeType=MCP_APP_MIME_TYPE,
-        text=render_brief_html(brief),
-        _meta={f"{_UI_METADATA_PREFIX}preferred-frame-size": ["920px", "720px"]},
+    return create_ui_resource(
+        {
+            "uri": f"ui://customer-context-mcp/meeting-brief/{brief.get('id', 'unknown')}",
+            "content": {
+                "type": "rawHtml",
+                "htmlString": render_brief_html(brief),
+            },
+            "encoding": "text",
+            "uiMetadata": {
+                UIMetadataKey.PREFERRED_FRAME_SIZE: ["920px", "720px"],
+            },
+        }
     )
-    return EmbeddedResource(type="resource", resource=resource)
