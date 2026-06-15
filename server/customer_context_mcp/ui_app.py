@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import html
 from typing import Any
+from urllib.parse import urlparse
 
 from mcp.types import EmbeddedResource, TextResourceContents
 from pydantic import AnyUrl
@@ -42,6 +43,22 @@ def _esc(value: Any) -> str:
     if value is None:
         return ""
     return html.escape(str(value), quote=True)
+
+
+def _safe_url(value: Any) -> str | None:
+    # Evidence URLs come from external systems (Notion / Slack / Google Drive).
+    # Block javascript: / data: / vbscript: etc. — the HTML is rendered inside
+    # the MCP host's iframe and a click on a malicious href would execute in
+    # that sandbox.
+    if not value:
+        return None
+    try:
+        parsed = urlparse(str(value))
+    except Exception:
+        return None
+    if parsed.scheme.lower() not in {"http", "https", "mailto"}:
+        return None
+    return str(value)
 
 
 def _source_chip(source: str) -> str:
@@ -272,7 +289,7 @@ def _render_evidence(brief: dict) -> str:
         return ""
     items = []
     for e in evidence[:50]:
-        url = e.get("url")
+        url = _safe_url(e.get("url"))
         title = _esc(e.get("title", e.get("id", "")))
         title_html = (
             f'<a href="{_esc(url)}" target="_blank" rel="noopener noreferrer" '
@@ -306,10 +323,21 @@ def render_brief_html(brief: dict) -> str:
         + _render_timeline(brief)
         + _render_evidence(brief)
     )
+    # CSP defense-in-depth: no scripts, no remote subresources, no plugins, no
+    # framing of other pages. The dashboard is fully static so this is safe.
+    csp = (
+        "default-src 'none'; "
+        "style-src 'unsafe-inline'; "
+        "img-src data:; "
+        "base-uri 'none'; "
+        "form-action 'none'; "
+        "frame-ancestors *"
+    )
     return (
         "<!DOCTYPE html><html lang=\"en\"><head>"
         '<meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<meta http-equiv="Content-Security-Policy" content="{csp}">'
         f"<title>Meeting Brief — {_esc(brief.get('customer_name', ''))}</title>"
         "<style>"
         "html,body{margin:0;padding:0;background:#f8fafc;color:#0f172a;"
