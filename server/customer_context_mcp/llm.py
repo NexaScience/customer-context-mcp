@@ -90,7 +90,13 @@ BRIEF_SYSTEM = (
     "Write every human-readable string value (summary, meeting_objective, titles, "
     "rationales, owners, timeline summaries) in Japanese (日本語). Keep the JSON keys and "
     "the enum values in English: risk_level / severity must be one of high|medium|low, "
-    "and source must be one of notion|slack|google_drive."
+    "and source must be one of notion|slack|google_drive. "
+    "Synthesize concisely — do NOT transcribe the evidence. The input may be large, but "
+    "the brief must read as a tight summary: the summary field is a 3-5 sentence "
+    "executive overview; every title, action, question and timeline entry is a short "
+    "scannable phrase (one line, not a paragraph); rationales stay to one sentence. "
+    "Surface only the most important items per section (roughly 5-7 max), merging "
+    "duplicates and dropping minor noise."
 )
 
 BRIEF_SCHEMA_HINT = {

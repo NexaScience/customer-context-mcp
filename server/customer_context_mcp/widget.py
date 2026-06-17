@@ -150,7 +150,11 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
   .ev-src{font-size:12px;font-weight:700;margin-right:6px;}
   .ev-link{color:var(--accent);text-decoration:none;font-weight:600;}
   .ev-link:hover{text-decoration:underline;}
-  .ev-ex{display:block;font-size:13px;color:var(--ink2);margin-top:2px;line-height:1.55;}
+  .ev-ex{display:block;font-size:13px;color:var(--ink2);margin-top:2px;line-height:1.55;
+    max-height:160px;overflow-y:auto;white-space:pre-wrap;overflow-wrap:anywhere;
+    padding-right:6px;}
+  .ev-ex::-webkit-scrollbar{width:8px;}
+  .ev-ex::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
 </style>
 </head>
 <body>
@@ -370,9 +374,7 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
       var link = url
         ? '<a class="ev-link" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + title + '</a>'
         : '<span class="ev-link">' + title + '</span>';
-      var exText = e.excerpt ? String(e.excerpt) : '';
-      if (exText.length > 200) exText = exText.slice(0, 200).replace(/\s+\S*$/, '') + '…';
-      var ex = exText ? '<span class="ev-ex">' + esc(exText) + '</span>' : '';
+      var ex = e.excerpt ? '<span class="ev-ex">' + esc(e.excerpt) + '</span>' : '';
       return '<li id="ev-' + esc(e.id || "") + '">'
         + '<span class="ev-src src-' + esc(e.source || "") + '">' + esc(srcLabel(e.source)) + '</span>'
         + link + ex + '</li>';
