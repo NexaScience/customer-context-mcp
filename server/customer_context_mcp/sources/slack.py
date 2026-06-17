@@ -36,7 +36,7 @@ def search(
     customer_name: str,
     aliases: list[str] | None = None,
     period: Period = "30d",
-    limit: int = 15,
+    limit: int = 40,
 ) -> list[Evidence]:
     client = _client()
     query = _build_query(customer_name, aliases or [], period)

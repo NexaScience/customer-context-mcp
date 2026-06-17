@@ -28,9 +28,13 @@ def _client():
 
 
 def _generate(
-    system: str, contents: str, *, max_tokens: int, json_mode: bool = False, attempts: int = 3
+    system: str, contents: str, *, max_tokens: int | None = None, json_mode: bool = False, attempts: int = 3
 ) -> str:
     """Single-turn Gemini generation with a system instruction.
+
+    ``max_tokens`` caps the *output*; when ``None`` (the default) the model's
+    own maximum is used (gemini-3.1-flash-lite: 64K output). Input is bounded
+    only by the model's context window (~1M tokens), not by this function.
 
     Retries transient 5xx errors (e.g. 503 "model is overloaded") with
     exponential backoff, and converts any Gemini API error into
@@ -41,10 +45,9 @@ def _generate(
     from google.genai import types  # type: ignore
     from google.genai import errors as genai_errors  # type: ignore
 
-    cfg_kwargs: dict[str, Any] = {
-        "system_instruction": system,
-        "max_output_tokens": max_tokens,
-    }
+    cfg_kwargs: dict[str, Any] = {"system_instruction": system}
+    if max_tokens is not None:
+        cfg_kwargs["max_output_tokens"] = max_tokens
     if json_mode:
         cfg_kwargs["response_mime_type"] = "application/json"
 
@@ -130,7 +133,7 @@ def generate_brief_json(
         f"Evidence (use these evidence_ids when citing):\n{_evidence_block(evidence)}\n\n"
         f"Return JSON with this shape:\n{json.dumps(BRIEF_SCHEMA_HINT, indent=2)}"
     )
-    text = _generate(BRIEF_SYSTEM, user, max_tokens=4000, json_mode=True)
+    text = _generate(BRIEF_SYSTEM, user, json_mode=True)
     return _parse_json(text)
 
 
@@ -148,7 +151,7 @@ def answer_question(question: str, brief_json: dict[str, Any], evidence: list[Ev
         f"Evidence:\n{_evidence_block(evidence)}\n\n"
         f"Question: {question}"
     )
-    return _generate(QA_SYSTEM, user, max_tokens=1024).strip()
+    return _generate(QA_SYSTEM, user).strip()
 
 
 DRAFT_SYSTEM = (
@@ -188,7 +191,7 @@ def draft_message(
         f"Opportunities: {json.dumps(brief_json.get('opportunities', []), ensure_ascii=False)}\n\n"
         f"Evidence:\n{_evidence_block(evidence)}"
     )
-    return _generate(DRAFT_SYSTEM, user, max_tokens=1500).strip()
+    return _generate(DRAFT_SYSTEM, user).strip()
 
 
 def _parse_json(text: str) -> dict[str, Any]:

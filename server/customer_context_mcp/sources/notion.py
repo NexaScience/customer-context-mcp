@@ -61,7 +61,7 @@ def search(
     customer_name: str,
     aliases: list[str] | None = None,
     period: Period = "30d",
-    limit: int = 10,
+    limit: int = 40,
 ) -> list[Evidence]:
     client = _client()
     queries = [customer_name, *(aliases or [])]

@@ -370,7 +370,9 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
       var link = url
         ? '<a class="ev-link" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + title + '</a>'
         : '<span class="ev-link">' + title + '</span>';
-      var ex = e.excerpt ? '<span class="ev-ex">' + esc(e.excerpt) + '</span>' : '';
+      var exText = e.excerpt ? String(e.excerpt) : '';
+      if (exText.length > 200) exText = exText.slice(0, 200).replace(/\s+\S*$/, '') + '…';
+      var ex = exText ? '<span class="ev-ex">' + esc(exText) + '</span>' : '';
       return '<li id="ev-' + esc(e.id || "") + '">'
         + '<span class="ev-src src-' + esc(e.source || "") + '">' + esc(srcLabel(e.source)) + '</span>'
         + link + ex + '</li>';
