@@ -142,14 +142,15 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .suggest:hover{border-color:var(--accent);color:var(--accent);}
 
-  .ev{padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:var(--bg);margin-bottom:12px;}
-  .ev.hi{outline:2px solid var(--accent);}
-  .ev .head{display:flex;gap:10px;align-items:baseline;}
-  .ev .src{font-size:12px;font-weight:700;}
+  ul.evlist{list-style:disc;margin:0;padding-left:20px;}
+  ul.evlist li{padding:6px 0;font-size:14px;line-height:1.5;}
+  ul.evlist li::marker{color:var(--ink3);}
+  ul.evlist li.hi{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px;}
   .src-notion{color:#111827;} .src-slack{color:#4a154b;} .src-google_drive{color:#1a73e8;}
-  .ev .etitle{font-size:14px;font-weight:600;color:var(--ink);}
-  .ev a.etitle{color:var(--ink);text-decoration:none;} .ev a.etitle:hover{text-decoration:underline;}
-  .ev .excerpt{margin-top:4px;font-size:13px;color:var(--ink2);line-height:1.55;}
+  .ev-src{font-size:12px;font-weight:700;margin-right:6px;}
+  .ev-link{color:var(--accent);text-decoration:none;font-weight:600;}
+  .ev-link:hover{text-decoration:underline;}
+  .ev-ex{display:block;font-size:13px;color:var(--ink2);margin-top:2px;line-height:1.55;}
 </style>
 </head>
 <body>
@@ -363,18 +364,18 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
   function cardEvidence(b) {
     var ev = b.evidence || [];
     if (!ev.length) return '<section class="card"><h3>Evidence Drawer</h3><p class="empty">No evidence collected.</p></section>';
-    var inner = ev.slice(0, 50).map(function (e) {
+    var items = ev.slice(0, 50).map(function (e) {
       var url = safeUrl(e.url);
       var title = esc(e.title || e.id || "");
-      var titleHtml = url
-        ? '<a class="etitle" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + title + '</a>'
-        : '<span class="etitle">' + title + '</span>';
-      return '<div class="ev" id="ev-' + esc(e.id || "") + '">'
-        + '<div class="head"><span class="src src-' + esc(e.source || "") + '">' + esc(srcLabel(e.source)) + '</span>'
-        + titleHtml + '</div>'
-        + (e.excerpt ? '<div class="excerpt">' + esc(e.excerpt) + '</div>' : '') + '</div>';
+      var link = url
+        ? '<a class="ev-link" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + title + '</a>'
+        : '<span class="ev-link">' + title + '</span>';
+      var ex = e.excerpt ? '<span class="ev-ex">' + esc(e.excerpt) + '</span>' : '';
+      return '<li id="ev-' + esc(e.id || "") + '">'
+        + '<span class="ev-src src-' + esc(e.source || "") + '">' + esc(srcLabel(e.source)) + '</span>'
+        + link + ex + '</li>';
     }).join("");
-    return '<section class="card"><h3>Evidence Drawer</h3>' + inner + '</section>';
+    return '<section class="card"><h3>Evidence Drawer</h3><ul class="evlist">' + items + '</ul></section>';
   }
 
   function render(brief) {
