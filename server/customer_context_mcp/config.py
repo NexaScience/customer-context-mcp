@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
-GEMINI_MODEL = "gemini-3.5-flash"
+GEMINI_MODEL = "gemini-3.1-flash-lite"
 HTTP_HOST = "127.0.0.1"
 HTTP_PORT = 8787
 GOOGLE_CREDENTIALS_FILE = "./credentials.json"
