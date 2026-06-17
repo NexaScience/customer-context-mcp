@@ -31,7 +31,7 @@ def period_to_cutoff(period: Period) -> Optional[datetime]:
     return datetime.now(timezone.utc) - timedelta(days=days)
 
 
-def shorten(text: str, limit: int = 8000) -> str:
+def shorten(text: str, limit: int = 100000) -> str:
     text = (text or "").strip()
     if len(text) <= limit:
         return text
