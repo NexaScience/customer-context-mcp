@@ -72,13 +72,19 @@ The tool also declares the widget on its `_meta`:
 ```
 
 …and registers the widget itself as an MCP Resource with MIME
-`text/html;profile=mcp-app`. The widget HTML is a static JS shell that
-listens for the `ui/notifications/tool-result` postMessage from the host
-and renders the brief from `structuredContent`.
+`text/html;profile=mcp-app`. The widget HTML is a self-contained JS shell that
+implements the MCP Apps view-side protocol: on load it completes the
+`ui/initialize` → `ui/notifications/initialized` handshake (applying the host's
+theme / CSS variables / fonts / safe-area from `hostContext`), and **only then**
+does the host deliver the brief via `ui/notifications/tool-result`, which the
+shell renders from `structuredContent`. It also answers host `ping` /
+`ui/resource-teardown` requests and reports `ui/notifications/size-changed` so
+the host can fit the iframe to the content. Skipping the handshake leaves the
+iframe blank on strict hosts (e.g. ChatGPT).
 
 | Host | Render path |
 |---|---|
-| **ChatGPT Apps** | Reads `_meta.ui.resourceUri` → fetches the registered `ui://…meeting-brief.html` resource → renders iframe → delivers `structuredContent` via postMessage → JS shell paints the dashboard |
+| **ChatGPT Apps** | Reads `_meta.ui.resourceUri` → fetches the registered `ui://…meeting-brief.html` resource → renders iframe → iframe completes the `ui/initialize` handshake → host delivers `structuredContent` via `ui/notifications/tool-result` → JS shell paints the dashboard |
 | **mcp-ui hosts** (e.g. mcp-ui inspector, Claude with mcp-ui) | Sees `content[1]` `UIResource` (already-rendered HTML) inline in the tool result |
 | **Plain MCP clients** | Sees `content[0]` `TextContent` JSON as plain output |
 
@@ -86,7 +92,7 @@ and renders the brief from `structuredContent`.
 
 | File | Role |
 |---|---|
-| [`server/customer_context_mcp/widget.py`](server/customer_context_mcp/widget.py) | Iframe shell HTML + JS `postMessage` listener for ChatGPT Apps |
+| [`server/customer_context_mcp/widget.py`](server/customer_context_mcp/widget.py) | Iframe shell HTML + MCP Apps view-side protocol (handshake, host-context theming, tool-result rendering, auto-resize) for ChatGPT Apps |
 | [`server/customer_context_mcp/ui_app.py`](server/customer_context_mcp/ui_app.py) | Server-side renderer that produces the inline `UIResource` for mcp-ui hosts (via `mcp_ui_server.create_ui_resource`) |
 | [`server/customer_context_mcp/server.py`](server/customer_context_mcp/server.py) | Tool / resource registration via FastMCP's `AppConfig`, `UI_MIME_TYPE`, and `ToolResult` |
 
