@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 from .config import GEMINI_MODEL, CONFIG
@@ -26,10 +27,19 @@ def _client():
     return genai.Client(api_key=CONFIG.gemini_api_key)
 
 
-def _generate(system: str, contents: str, *, max_tokens: int, json_mode: bool = False) -> str:
-    """Single-turn Gemini generation with a system instruction."""
+def _generate(
+    system: str, contents: str, *, max_tokens: int, json_mode: bool = False, attempts: int = 3
+) -> str:
+    """Single-turn Gemini generation with a system instruction.
+
+    Retries transient 5xx errors (e.g. 503 "model is overloaded") with
+    exponential backoff, and converts any Gemini API error into
+    ``LLMUnavailable`` so callers degrade gracefully instead of crashing the
+    MCP session.
+    """
     client = _client()
     from google.genai import types  # type: ignore
+    from google.genai import errors as genai_errors  # type: ignore
 
     cfg_kwargs: dict[str, Any] = {
         "system_instruction": system,
@@ -37,12 +47,24 @@ def _generate(system: str, contents: str, *, max_tokens: int, json_mode: bool = 
     }
     if json_mode:
         cfg_kwargs["response_mime_type"] = "application/json"
-    resp = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(**cfg_kwargs),
-    )
-    return resp.text or ""
+
+    for attempt in range(attempts):
+        try:
+            resp = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=contents,
+                config=types.GenerateContentConfig(**cfg_kwargs),
+            )
+            return resp.text or ""
+        except genai_errors.ServerError as e:  # 5xx — usually transient overload
+            if attempt < attempts - 1:
+                log.warning("Gemini 5xx (attempt %d/%d): %s", attempt + 1, attempts, e)
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise LLMUnavailable(f"Gemini temporarily unavailable: {e}") from e
+        except genai_errors.ClientError as e:  # 4xx — bad key/request, not retryable
+            raise LLMUnavailable(f"Gemini request failed: {e}") from e
+    raise LLMUnavailable("Gemini unavailable")  # unreachable, satisfies type checker
 
 
 def _evidence_block(evidence: list[Evidence]) -> str:

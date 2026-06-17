@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..llm import answer_question
+from ..llm import LLMUnavailable, answer_question
 from ..store import STORE
 from ..types import Source
 
@@ -21,11 +21,15 @@ def ask_meeting_brief(
         scope = set(evidence_scope)
         evidence = [e for e in evidence if e.source in scope]
 
-    answer = answer_question(
-        question=question,
-        brief_json=brief.model_dump(),
-        evidence=evidence,
-    )
+    try:
+        answer = answer_question(
+            question=question,
+            brief_json=brief.model_dump(),
+            evidence=evidence,
+        )
+    except LLMUnavailable as e:
+        return {"brief_id": brief_id, "question": question, "error": str(e)}
+
     return {
         "brief_id": brief_id,
         "question": question,
