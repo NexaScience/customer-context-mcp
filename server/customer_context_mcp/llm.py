@@ -42,7 +42,11 @@ BRIEF_SYSTEM = (
     "Drive about a single customer, you must produce a structured meeting-prep brief in "
     "JSON. Every risk, opportunity, action and timeline entry must cite evidence_ids that "
     "exist in the provided evidence list. If a section has no support in the evidence, "
-    "return an empty list rather than fabricating. Respond with JSON only — no prose."
+    "return an empty list rather than fabricating. Respond with JSON only — no prose. "
+    "Write every human-readable string value (summary, meeting_objective, titles, "
+    "rationales, owners, timeline summaries) in Japanese (日本語). Keep the JSON keys and "
+    "the enum values in English: risk_level / severity must be one of high|medium|low, "
+    "and source must be one of notion|slack|google_drive."
 )
 
 BRIEF_SCHEMA_HINT = {
@@ -99,7 +103,7 @@ def generate_brief_json(
 QA_SYSTEM = (
     "You are answering follow-up questions about a customer meeting brief. Use only the "
     "supplied evidence to answer. If the answer cannot be supported by the evidence, say "
-    "so. Be concise and cite evidence_ids inline as [id]."
+    "so. Be concise and cite evidence_ids inline as [id]. Always answer in Japanese (日本語)."
 )
 
 
@@ -123,7 +127,7 @@ def answer_question(question: str, brief_json: dict[str, Any], evidence: list[Ev
 DRAFT_SYSTEM = (
     "You are drafting professional, concise customer-facing or internal messages from a "
     "meeting brief. Use only facts supported by the evidence. Match the requested purpose. "
-    "Return the message body only — no preamble."
+    "Return the message body only — no preamble. Write the message in Japanese (日本語)."
 )
 
 PURPOSE_INSTRUCTIONS = {
