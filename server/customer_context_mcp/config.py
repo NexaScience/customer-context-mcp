@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
-ANTHROPIC_MODEL = "claude-opus-4-7"
+GEMINI_MODEL = "gemini-3.5-flash"
 HTTP_HOST = "127.0.0.1"
 HTTP_PORT = 8787
 GOOGLE_CREDENTIALS_FILE = "./credentials.json"
@@ -31,7 +31,7 @@ def _env(name: str) -> str | None:
 
 @dataclass(frozen=True)
 class Config:
-    anthropic_api_key: str | None = _env("ANTHROPIC_API_KEY")
+    gemini_api_key: str | None = _env("GEMINI_API_KEY")
     notion_token: str | None = _env("NOTION_TOKEN")
     slack_bot_token: str | None = _env("SLACK_BOT_TOKEN")
 

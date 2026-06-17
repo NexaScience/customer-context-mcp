@@ -151,7 +151,7 @@ def generate_meeting_brief(
         raw = {
             "summary": (
                 f"LLM unavailable ({e}). Returning raw evidence only — configure "
-                "ANTHROPIC_API_KEY to enable analysis."
+                "GEMINI_API_KEY to enable analysis."
             ),
             "meeting_objective": objective or "",
             "risk_level": "medium",

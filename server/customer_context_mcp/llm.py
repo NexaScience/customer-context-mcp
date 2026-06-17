@@ -1,4 +1,4 @@
-"""LLM helpers — Anthropic-backed brief generation and Q&A."""
+"""LLM helpers — Gemini-backed brief generation and Q&A."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Any
 
-from .config import ANTHROPIC_MODEL, CONFIG
+from .config import GEMINI_MODEL, CONFIG
 from .types import Evidence
 
 log = logging.getLogger(__name__)
@@ -17,13 +17,32 @@ class LLMUnavailable(RuntimeError):
 
 
 def _client():
-    if not CONFIG.anthropic_api_key:
-        raise LLMUnavailable("ANTHROPIC_API_KEY is not set")
+    if not CONFIG.gemini_api_key:
+        raise LLMUnavailable("GEMINI_API_KEY is not set")
     try:
-        import anthropic  # type: ignore
+        from google import genai  # type: ignore
     except ImportError as e:
-        raise LLMUnavailable(f"anthropic package not installed: {e}") from e
-    return anthropic.Anthropic(api_key=CONFIG.anthropic_api_key)
+        raise LLMUnavailable(f"google-genai package not installed: {e}") from e
+    return genai.Client(api_key=CONFIG.gemini_api_key)
+
+
+def _generate(system: str, contents: str, *, max_tokens: int, json_mode: bool = False) -> str:
+    """Single-turn Gemini generation with a system instruction."""
+    client = _client()
+    from google.genai import types  # type: ignore
+
+    cfg_kwargs: dict[str, Any] = {
+        "system_instruction": system,
+        "max_output_tokens": max_tokens,
+    }
+    if json_mode:
+        cfg_kwargs["response_mime_type"] = "application/json"
+    resp = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=contents,
+        config=types.GenerateContentConfig(**cfg_kwargs),
+    )
+    return resp.text or ""
 
 
 def _evidence_block(evidence: list[Evidence]) -> str:
@@ -81,7 +100,6 @@ def generate_brief_json(
     objective: str | None,
     evidence: list[Evidence],
 ) -> dict[str, Any]:
-    client = _client()
     user = (
         f"Customer: {customer_name}\n"
         f"Aliases: {', '.join(aliases) if aliases else '(none)'}\n"
@@ -90,13 +108,7 @@ def generate_brief_json(
         f"Evidence (use these evidence_ids when citing):\n{_evidence_block(evidence)}\n\n"
         f"Return JSON with this shape:\n{json.dumps(BRIEF_SCHEMA_HINT, indent=2)}"
     )
-    msg = client.messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=4000,
-        system=BRIEF_SYSTEM,
-        messages=[{"role": "user", "content": user}],
-    )
-    text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+    text = _generate(BRIEF_SYSTEM, user, max_tokens=4000, json_mode=True)
     return _parse_json(text)
 
 
@@ -108,20 +120,13 @@ QA_SYSTEM = (
 
 
 def answer_question(question: str, brief_json: dict[str, Any], evidence: list[Evidence]) -> str:
-    client = _client()
     user = (
         f"Brief summary: {brief_json.get('summary', '')}\n"
         f"Objective: {brief_json.get('meeting_objective', '')}\n\n"
         f"Evidence:\n{_evidence_block(evidence)}\n\n"
         f"Question: {question}"
     )
-    msg = client.messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=1024,
-        system=QA_SYSTEM,
-        messages=[{"role": "user", "content": user}],
-    )
-    return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text").strip()
+    return _generate(QA_SYSTEM, user, max_tokens=1024).strip()
 
 
 DRAFT_SYSTEM = (
@@ -149,7 +154,6 @@ PURPOSE_INSTRUCTIONS = {
 def draft_message(
     purpose: str, brief_json: dict[str, Any], evidence: list[Evidence]
 ) -> str:
-    client = _client()
     purpose_clean = purpose if purpose in PURPOSE_INSTRUCTIONS else "follow_up_email"
     instruction = PURPOSE_INSTRUCTIONS[purpose_clean]
     user = (
@@ -162,13 +166,7 @@ def draft_message(
         f"Opportunities: {json.dumps(brief_json.get('opportunities', []), ensure_ascii=False)}\n\n"
         f"Evidence:\n{_evidence_block(evidence)}"
     )
-    msg = client.messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=1500,
-        system=DRAFT_SYSTEM,
-        messages=[{"role": "user", "content": user}],
-    )
-    return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text").strip()
+    return _generate(DRAFT_SYSTEM, user, max_tokens=1500).strip()
 
 
 def _parse_json(text: str) -> dict[str, Any]:
