@@ -53,14 +53,14 @@ customer-context-mcp/
 
 ```bash
 cp .env.example .env
-# ANTHROPIC_API_KEY, NOTION_TOKEN, SLACK_BOT_TOKEN を記入
+# GEMINI_API_KEY, NOTION_TOKEN, SLACK_USER_TOKEN を記入
 # Google Drive の OAuth クライアントを ./credentials.json に配置
 ```
 
 必要なスコープ：
 
-- **Notion**: 対象ページへの読み取り権限を持つインテグレーション（検索対象のページにインテグレーションを共有してください）。
-- **Slack** ボットスコープ: `channels:history`, `channels:read`, `groups:history`, `groups:read`, `im:history`, `mpim:history`, `search:read`, `users:read`。
+- **Notion**: インテグレーションを発行し、**検索対象のページに共有**してください（ページの ••• → 接続/Connections から追加）。Notion 検索は**共有されたページのみ**を返し、**ページタイトル**にマッチします（本文は対象外）。
+- **Slack**: **ユーザートークン（`xoxp-`）** に `search:read` スコープを付与してください（`SLACK_USER_TOKEN`）。`search.messages` は**ボットトークン（`xoxb-`）では呼べません**（`not_allowed_token_type`）。
 - **Google Drive**: *デスクトップアプリ*タイプの OAuth 2.0 クライアント。初回実行時にブラウザで同意し、`token.json` が書き出されます。
 
 ### 2. サーバー
@@ -108,7 +108,7 @@ uv run customer-context-mcp http --host 127.0.0.1 --port 8787   # → http://127
 3. **Add Server** → HTTP → `http://127.0.0.1:8787/mcp/`（末尾スラッシュ必須）
 4. **Playground / App Builder** で `generate_meeting_brief` を実行（*Tools* ページでは描画されない）
 
-> 2 カラム表示はデバイスを **Desktop** に。実データと **Ask** には `ANTHROPIC_API_KEY` が必要。
+> 2 カラム表示はデバイスを **Desktop** に。実データと **Ask** には `GEMINI_API_KEY` が必要。
 
 ### MCP stdio サーバー（Claude Desktop / Claude Code）
 

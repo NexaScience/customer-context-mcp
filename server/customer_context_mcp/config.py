@@ -33,6 +33,9 @@ def _env(name: str) -> str | None:
 class Config:
     gemini_api_key: str | None = _env("GEMINI_API_KEY")
     notion_token: str | None = _env("NOTION_TOKEN")
+    # search.messages requires a Slack *user* token (xoxp-) with search:read.
+    # A bot token (xoxb-) cannot call search; it is only a fallback.
+    slack_user_token: str | None = _env("SLACK_USER_TOKEN")
     slack_bot_token: str | None = _env("SLACK_BOT_TOKEN")
 
 

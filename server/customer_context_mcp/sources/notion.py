@@ -107,4 +107,10 @@ def search(
             )
             if len(out) >= limit:
                 return out
+    if not out:
+        log.info(
+            "notion search returned 0 results — ensure the integration is shared "
+            "with the target pages (Page ••• → Connections) and that the customer "
+            "name appears in page titles (Notion search matches titles, not body)."
+        )
     return out
