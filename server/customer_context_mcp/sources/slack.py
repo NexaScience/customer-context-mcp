@@ -36,12 +36,14 @@ def search(
     customer_name: str,
     aliases: list[str] | None = None,
     period: Period = "30d",
-    limit: int = 40,
+    limit: int = 200,
 ) -> list[Evidence]:
     client = _client()
     query = _build_query(customer_name, aliases or [], period)
     try:
-        resp = client.search_messages(query=query, count=limit, sort="timestamp", sort_dir="desc")
+        resp = client.search_messages(
+            query=query, count=min(limit, 100), sort="timestamp", sort_dir="desc"
+        )  # Slack search count caps at 100
     except Exception as e:  # noqa: BLE001
         log.warning("slack search failed: %s", e)
         return []

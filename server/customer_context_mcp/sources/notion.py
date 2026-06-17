@@ -61,7 +61,7 @@ def search(
     customer_name: str,
     aliases: list[str] | None = None,
     period: Period = "30d",
-    limit: int = 40,
+    limit: int = 200,
 ) -> list[Evidence]:
     client = _client()
     queries = [customer_name, *(aliases or [])]
@@ -73,7 +73,7 @@ def search(
             resp = client.search(
                 query=q,
                 filter={"property": "object", "value": "page"},
-                page_size=limit,
+                page_size=min(limit, 100),  # Notion API caps page_size at 100
             )
         except Exception as e:  # noqa: BLE001
             log.warning("notion search failed for %s: %s", q, e)

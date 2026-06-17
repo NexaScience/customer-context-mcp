@@ -73,7 +73,7 @@ def search(
     customer_name: str,
     aliases: list[str] | None = None,
     period: Period = "30d",
-    limit: int = 40,
+    limit: int = 200,
 ) -> list[Evidence]:
     service = _service()
     q = _build_query(customer_name, aliases or [], period)
@@ -82,7 +82,7 @@ def search(
             service.files()
             .list(
                 q=q,
-                pageSize=limit,
+                pageSize=min(limit, 1000),  # Drive files.list caps pageSize at 1000
                 fields=(
                     "files(id,name,mimeType,modifiedTime,webViewLink,description,owners(displayName))"
                 ),
