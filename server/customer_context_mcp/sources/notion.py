@@ -41,9 +41,9 @@ def _page_title(page: dict) -> str:
     return page.get("id", "Untitled")
 
 
-def _excerpt_from_blocks(client, page_id: str, max_blocks: int = 12) -> str:
+def _excerpt_from_blocks(client, page_id: str, max_blocks: int = 50, budget: int = 20000) -> str:
     try:
-        resp = client.blocks.children.list(block_id=page_id, page_size=max_blocks)
+        resp = client.blocks.children.list(block_id=page_id, page_size=min(max_blocks, 100))
     except Exception as e:  # noqa: BLE001
         log.warning("notion blocks fetch failed for %s: %s", page_id, e)
         return ""
@@ -52,9 +52,127 @@ def _excerpt_from_blocks(client, page_id: str, max_blocks: int = 12) -> str:
         text = _block_text(block)
         if text:
             parts.append(text)
-        if sum(len(p) for p in parts) > 600:
+        if sum(len(p) for p in parts) > budget:
             break
     return "\n".join(parts)
+
+
+def _property_text(prop: dict) -> str:
+    """Plain text for any Notion property type (best-effort)."""
+    t = prop.get("type")
+    if t == "title":
+        return _plain_text(prop.get("title") or [])
+    if t == "rich_text":
+        return _plain_text(prop.get("rich_text") or [])
+    if t in ("select", "status"):
+        return (prop.get(t) or {}).get("name") or ""
+    if t == "multi_select":
+        return " ".join(o.get("name", "") for o in (prop.get("multi_select") or []))
+    if t == "people":
+        return " ".join(p.get("name", "") for p in (prop.get("people") or []) if isinstance(p, dict))
+    if t in ("url", "email", "phone_number"):
+        return str(prop.get(t) or "")
+    if t == "number":
+        n = prop.get("number")
+        return "" if n is None else str(n)
+    if t == "date":
+        return (prop.get("date") or {}).get("start") or ""
+    if t == "formula":
+        f = prop.get("formula") or {}
+        ft = f.get("type")
+        return str(f.get(ft) or "") if ft else ""
+    return ""
+
+
+def _row_searchable_text(page: dict) -> str:
+    parts = [_property_text(p) for p in (page.get("properties") or {}).values()]
+    return " \n".join(p for p in parts if p)
+
+
+def _properties_summary(page: dict) -> str:
+    """Compact 'Key: value' summary of the row's non-empty properties."""
+    bits = []
+    for name, prop in (page.get("properties") or {}).items():
+        txt = _property_text(prop)
+        if txt and prop.get("type") != "title":
+            bits.append(f"{name}: {txt}")
+    return " / ".join(bits)
+
+
+def _iter_db_rows(client, database_id: str, page_size: int = 100):
+    """Yield database rows newest-first, paginating until exhausted."""
+    cursor = None
+    while True:
+        kwargs = {
+            "database_id": database_id,
+            "page_size": min(page_size, 100),
+            "sorts": [{"timestamp": "last_edited_time", "direction": "descending"}],
+        }
+        if cursor:
+            kwargs["start_cursor"] = cursor
+        resp = client.databases.query(**kwargs)
+        for row in resp.get("results", []):
+            yield row
+        if not resp.get("has_more"):
+            return
+        cursor = resp.get("next_cursor")
+
+
+def _search_databases(
+    client, customer_name: str, aliases: list[str] | None, period: Period, limit: int
+) -> list[Evidence]:
+    from datetime import datetime
+
+    cutoff = period_to_cutoff(period)
+    needles = [n.lower() for n in [customer_name, *(aliases or [])] if n]
+    out: list[Evidence] = []
+    seen: set[str] = set()
+
+    for db_id in CONFIG.notion_database_ids:
+        try:
+            rows = _iter_db_rows(client, db_id)
+            for page in rows:
+                last_edited = page.get("last_edited_time")
+                if cutoff and last_edited:
+                    try:
+                        ts = datetime.fromisoformat(last_edited.replace("Z", "+00:00"))
+                        if ts < cutoff:
+                            break  # rows are newest-first → the rest are older too
+                    except ValueError:
+                        pass
+                pid = page.get("id")
+                if not pid or pid in seen:
+                    continue
+                hay = _row_searchable_text(page).lower()
+                if needles and not any(n in hay for n in needles):
+                    continue
+                seen.add(pid)
+                title = _page_title(page)
+                body = _excerpt_from_blocks(client, pid)
+                summary = _properties_summary(page)
+                excerpt = "\n".join(x for x in (summary, body) if x)
+                out.append(
+                    Evidence(
+                        id=f"notion:{pid}",
+                        source="notion",
+                        title=title or "Untitled",
+                        excerpt=shorten(excerpt or title or ""),
+                        url=page.get("url"),
+                        timestamp=last_edited,
+                    )
+                )
+                if len(out) >= limit:
+                    return out
+        except Exception as e:  # noqa: BLE001
+            log.warning("notion database query failed for %s: %s", db_id, e)
+            continue
+    if not out:
+        log.info(
+            "notion database search returned 0 results — check NOTION_DATABASE_IDS, "
+            "that the integration is shared with those databases, and that the "
+            "customer name appears in a row's title or properties."
+        )
+    return out
 
 
 def search(
@@ -64,6 +182,10 @@ def search(
     limit: int = 200,
 ) -> list[Evidence]:
     client = _client()
+    # Structured path: query configured databases (matches title + properties,
+    # includes row body). Falls back to the title-only search API otherwise.
+    if CONFIG.notion_database_ids:
+        return _search_databases(client, customer_name, aliases, period, limit)
     queries = [customer_name, *(aliases or [])]
     cutoff = period_to_cutoff(period)
     seen: set[str] = set()
