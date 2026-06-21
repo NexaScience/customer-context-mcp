@@ -99,6 +99,36 @@ def _properties_summary(page: dict) -> str:
     return " / ".join(bits)
 
 
+def _discover_database_ids(client, limit: int = 200) -> list[str]:
+    """Find every database the integration can see via the search API.
+
+    Any database shared with the integration is picked up, so the structured
+    search works without manually configuring database IDs.
+    """
+    ids: list[str] = []
+    cursor = None
+    while True:
+        kwargs: dict = {
+            "filter": {"property": "object", "value": "database"},
+            "page_size": 100,
+        }
+        if cursor:
+            kwargs["start_cursor"] = cursor
+        try:
+            resp = client.search(**kwargs)
+        except Exception as e:  # noqa: BLE001
+            log.warning("notion database discovery failed: %s", e)
+            break
+        for obj in resp.get("results", []):
+            did = obj.get("id")
+            if did and did not in ids:
+                ids.append(did)
+        if not resp.get("has_more") or len(ids) >= limit:
+            break
+        cursor = resp.get("next_cursor")
+    return ids
+
+
 def _iter_db_rows(client, database_id: str, page_size: int = 100):
     """Yield database rows newest-first, paginating until exhausted."""
     cursor = None
@@ -119,7 +149,12 @@ def _iter_db_rows(client, database_id: str, page_size: int = 100):
 
 
 def _search_databases(
-    client, customer_name: str, aliases: list[str] | None, period: Period, limit: int
+    client,
+    db_ids: list[str],
+    customer_name: str,
+    aliases: list[str] | None,
+    period: Period,
+    limit: int,
 ) -> list[Evidence]:
     from datetime import datetime
 
@@ -128,7 +163,7 @@ def _search_databases(
     out: list[Evidence] = []
     seen: set[str] = set()
 
-    for db_id in CONFIG.notion_database_ids:
+    for db_id in db_ids:
         try:
             rows = _iter_db_rows(client, db_id)
             for page in rows:
@@ -168,9 +203,9 @@ def _search_databases(
             continue
     if not out:
         log.info(
-            "notion database search returned 0 results — check NOTION_DATABASE_IDS, "
-            "that the integration is shared with those databases, and that the "
-            "customer name appears in a row's title or properties."
+            "notion database search returned 0 results — ensure the integration is "
+            "shared with the target databases and that the customer name appears in "
+            "a row's title or properties."
         )
     return out
 
@@ -182,10 +217,13 @@ def search(
     limit: int = 200,
 ) -> list[Evidence]:
     client = _client()
-    # Structured path: query configured databases (matches title + properties,
-    # includes row body). Falls back to the title-only search API otherwise.
-    if CONFIG.notion_database_ids:
-        return _search_databases(client, customer_name, aliases, period, limit)
+    # Structured path: every database shared with the integration is
+    # auto-discovered and queried (matches title + properties, includes row
+    # body). Falls back to the title-only page search API only when no databases
+    # are accessible.
+    db_ids = _discover_database_ids(client)
+    if db_ids:
+        return _search_databases(client, db_ids, customer_name, aliases, period, limit)
     queries = [customer_name, *(aliases or [])]
     cutoff = period_to_cutoff(period)
     seen: set[str] = set()
