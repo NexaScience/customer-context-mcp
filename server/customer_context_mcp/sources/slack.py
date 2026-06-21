@@ -13,13 +13,16 @@ log = logging.getLogger(__name__)
 
 
 def _client():
-    if not CONFIG.slack_bot_token:
-        raise SourceUnavailable("SLACK_BOT_TOKEN is not set")
+    # search.messages only works with a user token (xoxp-); the bot token is a
+    # fallback so a clear error surfaces instead of silently returning nothing.
+    token = CONFIG.slack_user_token or CONFIG.slack_bot_token
+    if not token:
+        raise SourceUnavailable("SLACK_USER_TOKEN (or SLACK_BOT_TOKEN) is not set")
     try:
         from slack_sdk import WebClient  # type: ignore
     except ImportError as e:
         raise SourceUnavailable(f"slack-sdk not installed: {e}") from e
-    return WebClient(token=CONFIG.slack_bot_token)
+    return WebClient(token=token)
 
 
 def _build_query(customer_name: str, aliases: list[str], period: Period) -> str:
@@ -36,13 +39,22 @@ def search(
     customer_name: str,
     aliases: list[str] | None = None,
     period: Period = "30d",
-    limit: int = 15,
+    limit: int = 200,
 ) -> list[Evidence]:
     client = _client()
     query = _build_query(customer_name, aliases or [], period)
     try:
-        resp = client.search_messages(query=query, count=limit, sort="timestamp", sort_dir="desc")
+        resp = client.search_messages(
+            query=query, count=min(limit, 100), sort="timestamp", sort_dir="desc"
+        )  # Slack search count caps at 100
     except Exception as e:  # noqa: BLE001
+        err = getattr(getattr(e, "response", None), "get", lambda *_: None)("error")
+        if err == "not_allowed_token_type":
+            raise SourceUnavailable(
+                "Slack search.messages requires a USER token (xoxp-) with the "
+                "search:read scope; a bot token (xoxb-) cannot call it. Set "
+                "SLACK_USER_TOKEN to a user token."
+            ) from e
         log.warning("slack search failed: %s", e)
         return []
     messages = (resp.get("messages") or {}).get("matches") or []

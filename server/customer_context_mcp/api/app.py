@@ -101,7 +101,7 @@ class DraftBody(BaseModel):
 def health() -> dict[str, Any]:
     return {
         "ok": True,
-        "anthropic": bool(CONFIG.anthropic_api_key),
+        "gemini": bool(CONFIG.gemini_api_key),
         "notion": bool(CONFIG.notion_token),
         "slack": bool(CONFIG.slack_bot_token),
         "google_drive": Path(GOOGLE_CREDENTIALS_FILE).exists(),

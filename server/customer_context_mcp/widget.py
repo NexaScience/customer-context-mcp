@@ -13,22 +13,19 @@ dependency-free vanilla JS so it loads in any sandboxed iframe:
      ``window.parent``, applies the returned ``hostContext`` (theme / styles /
      fonts / safe-area), then sends the ``ui/notifications/initialized``
      notification. **Hosts only deliver the tool result after this handshake
-     completes** — a passive listener that skips it leaves the iframe blank on
-     strict hosts (see modelcontextprotocol/ext-apps `App.connect`, and
+     completes** (see modelcontextprotocol/ext-apps `App.connect`, and
      anthropics/claude-ai-mcp#149).
-  2. **Tool result** — handles ``ui/notifications/tool-result`` (the primary
-     data path), reading ``structuredContent`` (falling back to the JSON in
-     ``content[].text``) and rendering the meeting brief.
-  3. **Host context** — handles ``ui/notifications/host-context-changed`` to
-     react to live theme / style changes, and answers host ``ping`` /
-     ``ui/resource-teardown`` requests so the host does not error or time out.
-  4. **Auto-resize** — reports ``ui/notifications/size-changed`` via
-     ``ResizeObserver`` so the host can size the iframe to the content.
-
-Theming follows the spec: structural surfaces consume host CSS variables
-(``--color-*``, ``--font-sans``, ``--border-radius-*``) with the previous
-palette as fallbacks, so the brief blends into both light and dark hosts while
-still rendering standalone.
+  2. **Tool result** — handles ``ui/notifications/tool-result``, reading
+     ``structuredContent`` (falling back to the JSON in ``content[].text``) and
+     rendering the meeting-brief dashboard.
+  3. **Interactivity** — the "Ask about this customer" box and the suggested
+     questions call the server's ``ask_meeting_brief`` tool via ``tools/call``
+     (proxied by the host), and "View evidence" links jump to the matching
+     entry in the Evidence Drawer.
+  4. **Host context** — handles ``ui/notifications/host-context-changed`` to
+     react to live theme / style changes, answers host ``ping`` /
+     ``ui/resource-teardown`` requests, and reports
+     ``ui/notifications/size-changed`` via ``ResizeObserver``.
 """
 
 from __future__ import annotations
@@ -44,59 +41,125 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Meeting Brief</title>
+<title>Customer Meeting Brief</title>
 <style>
-  :root{color-scheme:light dark;}
-  html,body{margin:0;padding:0;
-    background:var(--color-background-primary,#f8fafc);
-    color:var(--color-text-primary,#0f172a);
-    font-family:var(--font-sans,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif);}
-  .wrap{max-width:880px;margin:0 auto;padding:18px;}
-  .empty{color:var(--color-text-tertiary,#94a3b8);font-size:13px;margin:0;}
-  .header{background:linear-gradient(135deg,#1e293b,#0f172a);color:#f8fafc;
-    padding:22px 24px;border-radius:var(--border-radius-xl,14px);margin-bottom:14px;
-    box-shadow:var(--shadow-sm,0 1px 2px rgba(15,23,42,0.04));}
-  .header .label{font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:#94a3b8;}
-  .header h1{margin:6px 0 0;font-size:24px;font-weight:700;letter-spacing:-0.01em;}
-  .header .alias{font-size:12px;color:#cbd5e1;margin-top:2px;}
-  .header .meta{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#cbd5e1;margin-top:8px;}
-  section.card{background:var(--color-background-secondary,#ffffff);
-    border:1px solid var(--color-border-primary,#e2e8f0);
-    border-radius:var(--border-radius-lg,12px);padding:16px 18px;margin-bottom:12px;}
-  section.card h2{margin:0 0 10px;font-size:13px;font-weight:700;
-    color:var(--color-text-primary,#0f172a);
-    text-transform:uppercase;letter-spacing:0.08em;}
+  :root{color-scheme:dark;
+    --bg:var(--color-background-primary,#1e2228);
+    --card:var(--color-background-secondary,#272c34);
+    --ink:var(--color-text-primary,#e6e8ec);
+    --ink2:var(--color-text-secondary,#9aa3ae);
+    --ink3:var(--color-text-tertiary,#6b7480);
+    --line:var(--color-border-primary,#3a414b);
+    --line2:var(--color-border-secondary,#2f343c);
+    --accent:var(--color-text-info,#60a5fa);
+    --radius:var(--border-radius-lg,16px);
+    --sans:var(--font-sans,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif);}
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--sans);}
+  .page{max-width:1500px;margin:0 auto;}
+  .empty{color:var(--ink3);font-size:13px;margin:0;}
+
+  /* top bar */
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;
+    flex-wrap:wrap;padding:20px 28px;background:var(--card);border-bottom:1px solid var(--line);}
+  .topbar h1{margin:0;font-size:28px;font-weight:800;letter-spacing:-0.02em;}
+  .topbar .sub{margin-top:2px;font-size:13px;color:var(--ink2);}
+  .topbar .sources{display:flex;gap:10px;flex-wrap:wrap;}
+  .pill-out{display:inline-flex;align-items:center;padding:6px 14px;border-radius:999px;
+    border:1px solid var(--line);background:transparent;font-size:13px;color:var(--ink2);white-space:nowrap;}
+
+  .body{padding:22px 28px 32px;}
+
+  /* customer card */
+  .customer{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+    background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 22px;margin-bottom:18px;}
+  .customer h2{margin:0;font-size:22px;font-weight:700;}
+  .customer .sub{margin-top:2px;font-size:13px;color:var(--ink2);}
+  .customer .pills{display:flex;gap:10px;flex-wrap:wrap;}
+  .tag{display:inline-flex;align-items:center;padding:6px 14px;border-radius:999px;border:1px solid var(--line);
+    font-size:13px;background:transparent;white-space:nowrap;}
+  .tag-risk-high{border-color:#7f1d1d;color:#fca5a5;}
+  .tag-risk-medium{border-color:#78440f;color:#fcd34d;}
+  .tag-risk-low{border-color:#14532d;color:#86efac;}
+  .tag-blue{border-color:#1e3a8a;color:#93c5fd;}
+  .tag-green{border-color:#14532d;color:#86efac;}
+  .tag-gray{border-color:var(--line);color:var(--ink2);}
+
+  /* layout grid */
+  .grid{display:grid;grid-template-columns:1.9fr 1fr;gap:16px;align-items:start;}
+  .col{display:flex;flex-direction:column;gap:16px;min-width:0;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  /* Collapse the main/side split first, then the inner 2-up pairs. Uses the
+     iframe's own width, so the layout adapts to whatever width the host gives. */
+  @media (max-width:760px){.grid{grid-template-columns:1fr;}}
+  @media (max-width:560px){.row2{grid-template-columns:1fr;}}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px;}
+  .card h3{margin:0 0 14px;font-size:17px;font-weight:700;letter-spacing:-0.01em;}
+  .card.summary p{margin:0;font-size:14px;line-height:1.7;color:var(--ink);}
+
   ul.rows{list-style:none;padding:0;margin:0;}
-  ul.rows li{padding:8px 0;border-bottom:1px solid var(--color-border-secondary,#f1f5f9);}
-  ul.rows li:last-child{border-bottom:none;}
-  .row-title{font-size:14px;color:var(--color-text-primary,#0f172a);font-weight:600;}
-  .row-text{font-size:14px;color:var(--color-text-primary,#0f172a);}
-  .row-sub{font-size:12px;color:var(--color-text-secondary,#64748b);margin-top:2px;}
-  .row-flex{display:flex;justify-content:space-between;gap:8px;align-items:center;}
-  .timeline-row{display:flex;gap:10px;}
-  .timeline-date{min-width:80px;font-size:11px;color:var(--color-text-secondary,#64748b);
-    font-variant-numeric:tabular-nums;}
-  .timeline-body{flex:1;}
-  .src-chip{display:inline-block;padding:2px 8px;margin:0 4px 4px 0;
-    border-radius:999px;background:#eef2ff;color:#3730a3;font-size:11px;
-    font-weight:600;letter-spacing:0.02em;}
-  .ev-ref{display:inline-block;margin:2px 4px 0 0;padding:2px 8px;
-    border:1px solid var(--color-border-primary,#e2e8f0);border-radius:6px;
-    background:var(--color-background-tertiary,#f8fafc);
-    color:var(--color-text-secondary,#475569);font-size:11px;}
-  .sev{display:inline-block;padding:2px 8px;border-radius:999px;
-    font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;}
-  .sev-high{background:#fee2e2;color:#991b1b;}
-  .sev-medium{background:#fef3c7;color:#92400e;}
-  .sev-low{background:#dcfce7;color:#166534;}
-  .ev-link{color:var(--color-text-info,#1d4ed8);text-decoration:none;}
-  .ev-excerpt{font-size:12px;color:var(--color-text-secondary,#475569);margin-top:2px;line-height:1.5;}
-  .summary{margin:0;font-size:14px;line-height:1.6;color:var(--color-text-primary,#1e293b);}
+  ul.rows li{padding:9px 0;}
+  .topic{display:flex;align-items:center;gap:10px;justify-content:space-between;}
+  .topic .name{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:500;min-width:0;}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex:0 0 auto;}
+  .topic .src{font-size:12px;color:var(--ink3);white-space:nowrap;}
+
+  .risk{display:flex;gap:12px;padding:9px 0;align-items:flex-start;}
+  .sev{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;min-width:44px;padding:3px 10px;
+    border-radius:999px;font-size:12px;font-weight:600;}
+  .sev-high{background:rgba(239,68,68,0.18);color:#fca5a5;}
+  .sev-medium{background:rgba(245,158,11,0.18);color:#fcd34d;}
+  .sev-low{background:rgba(34,197,94,0.18);color:#86efac;}
+  .risk .rtitle{font-size:14px;font-weight:600;color:var(--ink);}
+  .risk .rlink{display:inline-block;margin-top:2px;font-size:13px;color:var(--accent);
+    text-decoration:none;cursor:pointer;background:none;border:none;padding:0;}
+  .risk .rlink:hover{text-decoration:underline;}
+
+  .opp{display:block;padding:11px 14px;border-radius:10px;background:rgba(34,197,94,0.12);
+    border:1px solid rgba(34,197,94,0.32);color:#86efac;font-size:14px;margin-bottom:10px;}
+  ol.actions{margin:0;padding-left:20px;}
+  ol.actions li{font-size:14px;line-height:1.6;padding:4px 0;color:var(--ink);}
+
+  .tl{display:flex;gap:14px;padding:6px 0;font-size:14px;}
+  .tl .date{color:var(--ink2);white-space:nowrap;font-variant-numeric:tabular-nums;}
+  .tl .txt{color:var(--ink);}
+
+  /* sidebar */
+  textarea.ask{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line);border-radius:12px;
+    padding:12px 14px;font:inherit;font-size:14px;background:var(--bg);color:var(--ink);}
+  textarea.ask:focus{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent);}
+  .ask-row{display:flex;justify-content:flex-end;margin-top:12px;}
+  .btn{appearance:none;border:none;cursor:pointer;font:inherit;font-weight:600;font-size:14px;
+    padding:9px 22px;border-radius:10px;background:#3b82f6;color:#fff;}
+  .btn:hover{background:#2563eb;}
+  .btn:disabled{opacity:.5;cursor:default;}
+  .answer{margin-top:14px;font-size:14px;line-height:1.7;white-space:pre-wrap;color:var(--ink);}
+  .answer.note{color:var(--ink2);font-size:13px;}
+
+  .suggest{display:block;width:100%;text-align:left;padding:11px 14px;border-radius:10px;border:1px solid var(--line);
+    background:var(--bg);color:var(--ink);font:inherit;font-size:13px;margin-bottom:10px;cursor:pointer;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .suggest:hover{border-color:var(--accent);color:var(--accent);}
+
+  ul.evlist{list-style:disc;margin:0;padding-left:20px;}
+  ul.evlist li{padding:6px 0;font-size:14px;line-height:1.5;}
+  ul.evlist li::marker{color:var(--ink3);}
+  ul.evlist li.hi{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px;}
+  .src-notion{color:#d1d5db;} .src-slack{color:#c4b5fd;} .src-google_drive{color:#7cb3ff;}
+  .ev-src{font-size:12px;font-weight:700;margin-right:6px;}
+  .ev-link{color:var(--accent);text-decoration:none;font-weight:600;}
+  .ev-link:hover{text-decoration:underline;}
+  .ev-ex{display:block;font-size:13px;color:var(--ink2);margin-top:2px;line-height:1.55;
+    max-height:160px;overflow-y:auto;white-space:pre-wrap;overflow-wrap:anywhere;
+    padding-right:6px;}
+  .ev-ex::-webkit-scrollbar{width:8px;}
+  .ev-ex::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px;}
 </style>
 </head>
 <body>
-<div class="wrap" id="root">
-  <p class="empty" id="empty-state">Waiting for meeting brief…</p>
+<div class="page" id="root">
+  <div class="body"><p class="empty" id="empty-state">Waiting for meeting brief…</p></div>
 </div>
 <script>
 (function () {
@@ -104,36 +167,46 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
 
   // ---------------------------------------------------------------------
   // MCP Apps view-side protocol over postMessage (no SDK dependency).
-  // Mirrors @modelcontextprotocol/ext-apps `App.connect()` + PostMessageTransport.
   // ---------------------------------------------------------------------
   var PROTOCOL_VERSION = "2026-01-26";
-  var APP_INFO = {name: "customer-context-meeting-brief", version: "0.1.0"};
+  var APP_INFO = {name: "customer-context-meeting-brief", version: "0.2.0"};
   var parentWin = window.parent;
   var nextId = 1;
   var pending = {};          // outbound request id -> callback(result|null)
   var initialized = false;
   var fontsApplied = false;
+  var currentBrief = null;
 
-  function post(msg) {
-    try { parentWin.postMessage(msg, "*"); } catch (_) { /* sandboxed */ }
-  }
+  function post(msg) { try { parentWin.postMessage(msg, "*"); } catch (_) {} }
   function request(method, params, cb) {
     var id = nextId++;
     if (cb) pending[id] = cb;
     post({jsonrpc: "2.0", id: id, method: method, params: params || {}});
   }
-  function notify(method, params) {
-    post({jsonrpc: "2.0", method: method, params: params || {}});
+  function notify(method, params) { post({jsonrpc: "2.0", method: method, params: params || {}}); }
+  function respond(id, result) { post({jsonrpc: "2.0", id: id, result: result || {}}); }
+  function respondError(id, code, message) { post({jsonrpc: "2.0", id: id, error: {code: code, message: message}}); }
+
+  // Call a tool on the originating MCP server (proxied by the host).
+  function callServerTool(name, args, cb) {
+    request("tools/call", {name: name, arguments: args || {}}, cb);
   }
-  function respond(id, result) {
-    post({jsonrpc: "2.0", id: id, result: result || {}});
-  }
-  function respondError(id, code, message) {
-    post({jsonrpc: "2.0", id: id, error: {code: code, message: message}});
+  function parseToolResult(result) {
+    if (!result) return null;
+    if (result.structuredContent && typeof result.structuredContent === "object") return result.structuredContent;
+    var c = result.content;
+    if (Array.isArray(c)) {
+      for (var i = 0; i < c.length; i++) {
+        if (c[i] && c[i].type === "text" && typeof c[i].text === "string") {
+          try { return JSON.parse(c[i].text); } catch (_) { return {answer: c[i].text}; }
+        }
+      }
+    }
+    return null;
   }
 
   // ---------------------------------------------------------------------
-  // Host theming — apply theme / CSS variables / fonts / safe-area insets.
+  // Host theming
   // ---------------------------------------------------------------------
   function applyTheme(theme) {
     if (theme !== "light" && theme !== "dark") return;
@@ -145,8 +218,7 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
     if (!vars || typeof vars !== "object") return;
     var root = document.documentElement;
     for (var k in vars) {
-      if (Object.prototype.hasOwnProperty.call(vars, k) &&
-          k.indexOf("--") === 0 && vars[k] != null) {
+      if (Object.prototype.hasOwnProperty.call(vars, k) && k.indexOf("--") === 0 && vars[k] != null) {
         root.style.setProperty(k, String(vars[k]));
       }
     }
@@ -161,8 +233,7 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
   function applySafeArea(insets) {
     if (!insets) return;
     document.body.style.padding =
-      (insets.top || 0) + "px " + (insets.right || 0) + "px " +
-      (insets.bottom || 0) + "px " + (insets.left || 0) + "px";
+      (insets.top || 0) + "px " + (insets.right || 0) + "px " + (insets.bottom || 0) + "px " + (insets.left || 0) + "px";
   }
   function applyHostContext(ctx) {
     if (!ctx || typeof ctx !== "object") return;
@@ -173,10 +244,11 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
   }
 
   // ---------------------------------------------------------------------
-  // Rendering
+  // Helpers
   // ---------------------------------------------------------------------
   var SOURCE_LABEL = {notion: "Notion", slack: "Slack", google_drive: "Google Drive"};
   var SAFE_SCHEMES = {"http:": 1, "https:": 1, "mailto:": 1};
+  var PERIOD_LABEL = {"7d": "7 days", "30d": "30 days", "90d": "90 days", "all": "All time"};
 
   function esc(s) {
     if (s === null || s === undefined) return "";
@@ -184,187 +256,167 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
       return ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c];
     });
   }
-
   function safeUrl(u) {
     if (!u) return null;
-    try {
-      var parsed = new URL(String(u), "https://example.invalid/");
-      return SAFE_SCHEMES[parsed.protocol] ? String(u) : null;
-    } catch (_) { return null; }
+    try { var p = new URL(String(u), "https://example.invalid/"); return SAFE_SCHEMES[p.protocol] ? String(u) : null; }
+    catch (_) { return null; }
+  }
+  function srcLabel(s) { return SOURCE_LABEL[s] || s || ""; }
+  function sevClass(s) { return ({high:1,medium:1,low:1}[s]) ? s : "medium"; }
+  function sevLabel(s) { return ({high:"High",medium:"Med",low:"Low"})[sevClass(s)]; }
+
+  // ---------------------------------------------------------------------
+  // Rendering — dashboard layout
+  // ---------------------------------------------------------------------
+  function renderTopbar(b) {
+    var chips = ["notion", "slack", "google_drive"]
+      .map(function (s) { return '<span class="pill-out">' + esc(SOURCE_LABEL[s]) + '</span>'; }).join("");
+    return '<header class="topbar">'
+      + '<div><h1>Customer Meeting Brief</h1><div class="sub">iframe MCP App / Meeting Preparation Assistant</div></div>'
+      + '<div class="sources">' + chips + '</div></header>';
   }
 
-  function sourceChip(src) {
-    return '<span class="src-chip">' + esc(SOURCE_LABEL[src] || src || "") + '</span>';
+  function renderCustomer(b) {
+    var meetingBits = [];
+    if (b.objective) meetingBits.push(esc(b.objective));
+    if (b.meeting_date) meetingBits.push(esc(b.meeting_date));
+    var sub = meetingBits.length ? '<div class="sub">Meeting: ' + meetingBits.join(" / ") + '</div>' : "";
+    var risk = sevClass(b.risk_level);
+    var period = PERIOD_LABEL[b.period] || esc(b.period || "30d");
+    var tags = ''
+      + '<span class="tag tag-risk-' + risk + '">Risk: ' + esc(({high:"High",medium:"Medium",low:"Low"})[risk]) + '</span>'
+      + '<span class="tag tag-blue">Sources: ' + esc(b.sources_count || 0) + ' items</span>'
+      + '<span class="tag tag-green">Period: ' + period + '</span>'
+      + '<span class="tag tag-gray">Updated now</span>';
+    return '<section class="customer"><div><h2>' + esc(b.customer_name || "") + '</h2>' + sub + '</div>'
+      + '<div class="pills">' + tags + '</div></section>';
   }
 
-  function sevBadge(sev) {
-    var cls = "sev-" + (({high:1,medium:1,low:1}[sev]) ? sev : "medium");
-    return '<span class="sev ' + cls + '">' + esc(sev || "medium") + '</span>';
+  function cardSummary(b) {
+    var body = b.summary ? '<p>' + esc(b.summary) + '</p>' : '<p class="empty">No summary yet.</p>';
+    return '<section class="card summary"><h3>Executive Summary</h3>' + body + '</section>';
   }
 
-  function evRefs(ids, byId) {
-    if (!ids || !ids.length) return "";
-    var chips = [];
-    for (var i = 0; i < ids.length; i++) {
-      var ev = byId[ids[i]];
-      if (!ev) continue;
-      var src = esc(SOURCE_LABEL[ev.source] || ev.source || "");
-      chips.push('<span class="ev-ref">' + src + ' · ' + esc(ev.title || ids[i]) + '</span>');
-    }
-    if (!chips.length) return "";
-    return '<div style="margin-top:6px;">' + chips.join("") + '</div>';
-  }
-
-  function section(title, bodyHtml, emptyMsg) {
-    var inner = (bodyHtml && bodyHtml.trim())
-      ? bodyHtml
-      : (emptyMsg ? '<p class="empty">' + esc(emptyMsg) + '</p>' : "");
-    return '<section class="card"><h2>' + esc(title) + '</h2>' + inner + '</section>';
-  }
-
-  function renderHeader(b) {
-    var aliases = (b.customer_aliases || []).join(", ");
-    var aliasHtml = aliases ? '<div class="alias">alias: ' + esc(aliases) + '</div>' : "";
-    var bits = [];
-    if (b.meeting_date) bits.push("Meeting: " + esc(b.meeting_date));
-    if (b.objective) bits.push("Objective: " + esc(b.objective));
-    bits.push("Period: " + esc(b.period || "30d"));
-    bits.push("Sources: " + esc(b.sources_count || 0));
-    var meta = '<div class="meta">'
-      + bits.map(function (m) { return '<span>' + m + '</span>'; }).join("")
-      + '<span>Risk: ' + sevBadge(b.risk_level || "medium") + '</span></div>';
-    return '<header class="header">'
-      + '<div class="label">Customer Meeting Brief</div>'
-      + '<h1>' + esc(b.customer_name || "") + '</h1>'
-      + aliasHtml + meta
-      + '</header>';
-  }
-
-  function renderSummary(b) {
-    if (!b.summary) return section("Executive Summary", "", "No summary yet.");
-    var body = '<p class="summary">' + esc(b.summary) + '</p>';
-    if (b.meeting_objective) {
-      body += '<p class="row-sub" style="margin:10px 0 0;">Objective — ' + esc(b.meeting_objective) + '</p>';
-    }
-    return section("Executive Summary", body);
-  }
-
-  function renderKeyTopics(b) {
+  function cardKeyTopics(b) {
     var topics = b.key_topics || [];
-    if (!topics.length) return section("Key Topics", "", "No key topics surfaced.");
-    var items = topics.map(function (t) {
-      var chips = (t.sources || []).map(sourceChip).join("");
-      return '<li><div class="row-title">' + esc(t.title || "") + '</div>' + chips + '</li>';
-    });
-    return section("Key Topics", '<ul class="rows">' + items.join("") + '</ul>');
+    var inner = topics.length ? '<ul class="rows">' + topics.map(function (t) {
+      var srcs = (t.sources || []).map(srcLabel).join(" / ");
+      return '<li class="topic"><span class="name"><span class="dot"></span>' + esc(t.title || "") + '</span>'
+        + '<span class="src">' + esc(srcs) + '</span></li>';
+    }).join("") + '</ul>' : '<p class="empty">No key topics surfaced.</p>';
+    return '<section class="card"><h3>Key Topics</h3>' + inner + '</section>';
   }
 
-  function renderRisks(b, byId) {
+  function cardRisks(b) {
     var risks = b.risks || [];
-    if (!risks.length) return section("Risks", "", "No risks flagged.");
-    var items = risks.map(function (r) {
-      return '<li><div class="row-flex">'
-        + '<div class="row-title">' + esc(r.title || "") + '</div>'
-        + sevBadge(r.severity || "medium")
-        + '</div>' + evRefs(r.evidence_ids, byId) + '</li>';
-    });
-    return section("Risks", '<ul class="rows">' + items.join("") + '</ul>');
+    var inner = risks.length ? '<ul class="rows">' + risks.map(function (r) {
+      var ids = (r.evidence_ids || []).filter(Boolean);
+      var link = ids.length
+        ? '<button class="rlink" data-action="view-evidence" data-ids="' + esc(ids.join(",")) + '">View evidence →</button>'
+        : "";
+      return '<li class="risk"><span class="sev sev-' + sevClass(r.severity) + '">' + esc(sevLabel(r.severity)) + '</span>'
+        + '<span><span class="rtitle">' + esc(r.title || "") + '</span>'
+        + (link ? '<br>' + link : '') + '</span></li>';
+    }).join("") + '</ul>' : '<p class="empty">No risks flagged.</p>';
+    return '<section class="card"><h3>Risks</h3>' + inner + '</section>';
   }
 
-  function renderOpportunities(b, byId) {
+  function cardOpportunities(b) {
     var opps = b.opportunities || [];
-    if (!opps.length) return section("Opportunities", "", "No opportunities flagged.");
-    var items = opps.map(function (o) {
-      return '<li><div class="row-title">' + esc(o.title || "") + '</div>'
-        + evRefs(o.evidence_ids, byId) + '</li>';
-    });
-    return section("Opportunities", '<ul class="rows">' + items.join("") + '</ul>');
+    var inner = opps.length ? opps.map(function (o) {
+      return '<span class="opp">' + esc(o.title || "") + '</span>';
+    }).join("") : '<p class="empty">No opportunities flagged.</p>';
+    return '<section class="card"><h3>Opportunities</h3>' + inner + '</section>';
   }
 
-  function renderQuestions(b) {
-    var qs = b.suggested_questions || [];
-    if (!qs.length) return section("Suggested Questions", "", "No questions suggested.");
-    var items = qs.map(function (q) {
-      var rat = q.rationale ? '<div class="row-sub">' + esc(q.rationale) + '</div>' : "";
-      return '<li><div class="row-text">' + esc(q.text || "") + '</div>' + rat + '</li>';
-    });
-    return section("Suggested Questions", '<ul class="rows">' + items.join("") + '</ul>');
-  }
-
-  function renderActions(b) {
+  function cardActions(b) {
     var actions = b.recommended_actions || [];
-    if (!actions.length) return section("Recommended Actions", "", "No actions recommended.");
-    var items = actions.map(function (a) {
-      var owner = a.owner ? '<span class="row-sub" style="margin-left:8px;">@ ' + esc(a.owner) + '</span>' : "";
-      return '<li><div class="row-text">' + esc(a.title || "") + owner + '</div></li>';
-    });
-    return section("Recommended Actions", '<ul class="rows">' + items.join("") + '</ul>');
+    var inner = actions.length ? '<ol class="actions">' + actions.map(function (a) {
+      var owner = a.owner ? ' <span class="src">@ ' + esc(a.owner) + '</span>' : "";
+      return '<li>' + esc(a.title || "") + owner + '</li>';
+    }).join("") + '</ol>' : '<p class="empty">No actions recommended.</p>';
+    return '<section class="card"><h3>Recommended Actions</h3>' + inner + '</section>';
   }
 
-  function renderTimeline(b) {
+  function cardTimeline(b) {
     var events = b.timeline || [];
-    if (!events.length) return section("Recent Timeline", "", "No recent activity captured.");
-    var items = events.map(function (e) {
-      var sub = e.summary ? '<div class="row-sub">' + esc(e.summary) + '</div>' : "";
-      return '<li class="timeline-row">'
-        + '<div class="timeline-date">' + esc(e.date || "") + '</div>'
-        + '<div class="timeline-body">'
-        + sourceChip(e.source)
-        + '<div class="row-title">' + esc(e.title || "") + '</div>' + sub
-        + '</div></li>';
-    });
-    return section("Recent Timeline", '<ul class="rows">' + items.join("") + '</ul>');
+    var inner = events.length ? '<ul class="rows">' + events.map(function (e) {
+      var txt = esc(srcLabel(e.source)) + ": " + esc(e.title || "");
+      return '<li class="tl"><span class="date">' + esc(e.date || "") + '</span><span class="txt">' + txt + '</span></li>';
+    }).join("") + '</ul>' : '<p class="empty">No recent activity captured.</p>';
+    return '<section class="card"><h3>Recent Timeline</h3>' + inner + '</section>';
   }
 
-  function renderEvidence(b) {
+  function cardAsk(b) {
+    return '<section class="card"><h3>Ask about this customer</h3>'
+      + '<textarea class="ask" id="ask-input" placeholder="この顧客について質問する…"></textarea>'
+      + '<div class="ask-row"><button class="btn" id="ask-btn" data-action="ask">Ask</button></div>'
+      + '<div class="answer" id="ask-answer"></div></section>';
+  }
+
+  function cardSuggested(b) {
+    var qs = b.suggested_questions || [];
+    if (!qs.length) return '';
+    var inner = qs.map(function (q) {
+      var text = q.text || "";
+      return '<button class="suggest" data-action="suggest" data-q="' + esc(text) + '" title="' + esc(text) + '">'
+        + esc(text) + '</button>';
+    }).join("");
+    return '<section class="card"><h3>Suggested Questions</h3>' + inner + '</section>';
+  }
+
+  function cardEvidence(b) {
     var ev = b.evidence || [];
-    if (!ev.length) return "";
+    if (!ev.length) return '<section class="card"><h3>Evidence Drawer</h3><p class="empty">No evidence collected.</p></section>';
     var items = ev.slice(0, 50).map(function (e) {
       var url = safeUrl(e.url);
       var title = esc(e.title || e.id || "");
-      var titleHtml = url
+      var link = url
         ? '<a class="ev-link" href="' + esc(url) + '" target="_blank" rel="noopener noreferrer">' + title + '</a>'
-        : title;
-      return '<li>' + sourceChip(e.source)
-        + '<div class="row-title">' + titleHtml + '</div>'
-        + '<div class="ev-excerpt">' + esc(e.excerpt || "") + '</div></li>';
-    });
-    return section("Evidence (" + ev.length + ")", '<ul class="rows">' + items.join("") + '</ul>');
+        : '<span class="ev-link">' + title + '</span>';
+      var ex = e.excerpt ? '<span class="ev-ex">' + esc(e.excerpt) + '</span>' : '';
+      return '<li id="ev-' + esc(e.id || "") + '">'
+        + '<span class="ev-src src-' + esc(e.source || "") + '">' + esc(srcLabel(e.source)) + '</span>'
+        + link + ex + '</li>';
+    }).join("");
+    return '<section class="card"><h3>Evidence Drawer</h3><ul class="evlist">' + items + '</ul></section>';
   }
 
   function render(brief) {
+    currentBrief = brief;
     if (!brief) {
-      document.getElementById("root").innerHTML
-        = '<p class="empty">No brief received yet.</p>';
+      document.getElementById("root").innerHTML = '<div class="body"><p class="empty">No brief received yet.</p></div>';
       return;
     }
-    var byId = {};
-    (brief.evidence || []).forEach(function (e) { if (e && e.id) byId[e.id] = e; });
     document.getElementById("root").innerHTML =
-      renderHeader(brief)
-      + renderSummary(brief)
-      + renderKeyTopics(brief)
-      + renderRisks(brief, byId)
-      + renderOpportunities(brief, byId)
-      + renderQuestions(brief)
-      + renderActions(brief)
-      + renderTimeline(brief)
-      + renderEvidence(brief);
+      renderTopbar(brief)
+      + '<div class="body">'
+      + renderCustomer(brief)
+      + '<div class="grid">'
+      +   '<div class="col">'
+      +     cardSummary(brief)
+      +     '<div class="row2">' + cardKeyTopics(brief) + cardRisks(brief) + '</div>'
+      +     '<div class="row2">' + cardOpportunities(brief) + cardActions(brief) + '</div>'
+      +     cardTimeline(brief)
+      +   '</div>'
+      +   '<div class="col">'
+      +     cardAsk(brief)
+      +     cardSuggested(brief)
+      +     cardEvidence(brief)
+      +   '</div>'
+      + '</div></div>';
     reportSize();
   }
 
   function extractBrief(params) {
-    // structuredContent is the primary location; fall back to content[].text JSON.
     if (!params) return null;
-    if (params.structuredContent && typeof params.structuredContent === "object") {
-      return params.structuredContent;
-    }
+    if (params.structuredContent && typeof params.structuredContent === "object") return params.structuredContent;
     var content = params.content;
     if (Array.isArray(content)) {
       for (var i = 0; i < content.length; i++) {
         var c = content[i];
         if (c && c.type === "text" && typeof c.text === "string") {
-          try { return JSON.parse(c.text); } catch (_) { /* ignore */ }
+          try { return JSON.parse(c.text); } catch (_) {}
         }
       }
     }
@@ -372,7 +424,75 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
   }
 
   // ---------------------------------------------------------------------
-  // Auto-resize — report content size so the host fits the iframe.
+  // Interactivity — Ask box, suggested questions, evidence jump
+  // ---------------------------------------------------------------------
+  function setAnswer(html, isNote) {
+    var el = document.getElementById("ask-answer");
+    if (!el) return;
+    el.className = "answer" + (isNote ? " note" : "");
+    el.innerHTML = html;
+    reportSize();
+  }
+
+  function submitAsk(question) {
+    question = (question || "").trim();
+    if (!question) return;
+    if (!currentBrief || !currentBrief.id) { setAnswer("ブリーフIDが見つかりません。", true); return; }
+    var btn = document.getElementById("ask-btn");
+    if (btn) btn.disabled = true;
+    setAnswer("回答を生成中…", true);
+    callServerTool("ask_meeting_brief", {brief_id: currentBrief.id, question: question}, function (result) {
+      if (btn) btn.disabled = false;
+      if (result === null) {
+        setAnswer("このホストでは追質問機能（サーバーツール呼び出し）が利用できません。", true);
+        return;
+      }
+      var data = parseToolResult(result);
+      if (data && typeof data.answer === "string") setAnswer(esc(data.answer));
+      else if (data && data.error) setAnswer(esc(String(data.error)), true);
+      else setAnswer("回答を取得できませんでした。", true);
+    });
+  }
+
+  function jumpToEvidence(ids) {
+    var first = (ids || "").split(",")[0];
+    if (!first) return;
+    var el = document.getElementById("ev-" + first);
+    if (!el) return;
+    el.scrollIntoView({behavior: "smooth", block: "center"});
+    (ids || "").split(",").forEach(function (id) {
+      var e = document.getElementById("ev-" + id);
+      if (e) { e.classList.add("hi"); setTimeout(function () { e.classList.remove("hi"); }, 2200); }
+    });
+  }
+
+  document.addEventListener("click", function (event) {
+    var t = event.target;
+    while (t && t !== document.body && !t.getAttribute("data-action")) t = t.parentElement;
+    if (!t || t === document.body) return;
+    var action = t.getAttribute("data-action");
+    if (action === "ask") {
+      var input = document.getElementById("ask-input");
+      submitAsk(input ? input.value : "");
+    } else if (action === "suggest") {
+      var q = t.getAttribute("data-q") || "";
+      var box = document.getElementById("ask-input");
+      if (box) box.value = q;
+      submitAsk(q);
+    } else if (action === "view-evidence") {
+      jumpToEvidence(t.getAttribute("data-ids") || "");
+    }
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      var input = document.getElementById("ask-input");
+      if (input && document.activeElement === input) submitAsk(input.value);
+    }
+  });
+
+  // ---------------------------------------------------------------------
+  // Auto-resize
   // ---------------------------------------------------------------------
   var lastW = -1, lastH = -1;
   function reportSize() {
@@ -390,32 +510,24 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
   }
 
   // ---------------------------------------------------------------------
-  // Message routing: responses, host requests, host notifications.
+  // Message routing
   // ---------------------------------------------------------------------
   window.addEventListener("message", function (event) {
     if (event.source !== parentWin) return;
     var msg = event.data;
     if (!msg || msg.jsonrpc !== "2.0") return;
 
-    // Response to one of our outbound requests (id present, no method).
-    if (msg.id !== undefined && msg.method === undefined) {
+    if (msg.id !== undefined && msg.method === undefined) {       // response to our request
       var cb = pending[msg.id];
       if (cb) { delete pending[msg.id]; cb(msg.error ? null : msg.result); }
       return;
     }
-
-    // Request from the host (id + method) — must answer so it doesn't time out.
-    if (msg.id !== undefined && msg.method) {
-      if (msg.method === "ping" || msg.method === "ui/resource-teardown") {
-        respond(msg.id, {});
-      } else {
-        respondError(msg.id, -32601, "Method not found: " + msg.method);
-      }
+    if (msg.id !== undefined && msg.method) {                     // request from host
+      if (msg.method === "ping" || msg.method === "ui/resource-teardown") respond(msg.id, {});
+      else respondError(msg.id, -32601, "Method not found: " + msg.method);
       return;
     }
-
-    // Notification from the host (method, no id).
-    if (msg.method) {
+    if (msg.method) {                                             // notification from host
       switch (msg.method) {
         case "ui/notifications/tool-result": {
           var brief = extractBrief(msg.params);
@@ -425,20 +537,16 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
         case "ui/notifications/host-context-changed":
           applyHostContext(msg.params);
           break;
-        // tool-input / tool-input-partial / tool-cancelled: nothing to do —
-        // the brief is delivered via tool-result.
       }
     }
   });
 
   // ---------------------------------------------------------------------
-  // Handshake: ui/initialize -> apply hostContext -> ui/notifications/initialized.
+  // Handshake: ui/initialize -> apply hostContext -> ui/notifications/initialized
   // ---------------------------------------------------------------------
   function connect() {
     request("ui/initialize", {
-      appCapabilities: {},
-      appInfo: APP_INFO,
-      protocolVersion: PROTOCOL_VERSION
+      appCapabilities: {}, appInfo: APP_INFO, protocolVersion: PROTOCOL_VERSION
     }, function (result) {
       if (result) applyHostContext(result.hostContext);
       notify("ui/notifications/initialized");
@@ -448,11 +556,8 @@ _WIDGET_HTML = r"""<!DOCTYPE html>
     });
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", connect);
-  } else {
-    connect();
-  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", connect);
+  else connect();
 })();
 </script>
 </body>
