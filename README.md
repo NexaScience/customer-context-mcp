@@ -53,16 +53,16 @@ customer-context-mcp/
 
 ```bash
 cp .env.example .env
-# GEMINI_API_KEY, NOTION_TOKEN, SLACK_USER_TOKEN を記入
+# GEMINI_API_KEY, NOTION_TOKEN, SLACK_BOT_TOKEN を記入
 # Google Drive の OAuth クライアントを ./credentials.json に配置
 ```
 
 必要なスコープ：
 
 - **Notion**: インテグレーションを発行し、**対象ページ/データベースに共有**してください（••• → 接続/Connections から追加）。
-  - 既定の検索 API は**ページタイトル**のみにマッチします（本文は対象外）。
-  - **構造化データ向け（推奨）**: `NOTION_DATABASE_IDS`（カンマ区切りのDB ID）を設定すると、そのデータベースを `databases.query` で走査し、**タイトル＋全プロパティ**で顧客名を照合、**各行の本文も取り込み**ます。DB ID はデータベース URL の32桁部分です。
-- **Slack**: **ユーザートークン（`xoxp-`）** に `search:read` スコープを付与してください（`SLACK_USER_TOKEN`）。`search.messages` は**ボットトークン（`xoxb-`）では呼べません**（`not_allowed_token_type`）。
+  - インテグレーションに共有された**データベースは自動検出**され、`databases.query` で走査します。**タイトル＋全プロパティ**で顧客名を照合し、**各行の本文も取り込み**ます（環境変数の設定は不要）。
+  - データベースに属さない通常ページは、既定の検索 API（**ページタイトル**のみにマッチ／本文は対象外）でフォールバック検索します。
+- **Slack**: **ボットトークン（`xoxb-`）** を使用します（`SLACK_BOT_TOKEN`）。Bot がメンバーになっているチャンネルの履歴を走査して顧客名で絞り込むため、`channels:read` / `groups:read`（チャンネル一覧）と `channels:history` / `groups:history`（メッセージ読み取り）のスコープを付与し、対象チャンネルに Bot を招待してください（`/invite @your-bot`）。
 - **Google Drive**: *デスクトップアプリ*タイプの OAuth 2.0 クライアント。初回実行時にブラウザで同意し、`token.json` が書き出されます。
 
 ### 2. サーバー
@@ -103,14 +103,29 @@ uv run customer-context-mcp http --host 127.0.0.1 --port 8787   # → http://127
 
 アプリの HMR 開発時は別ターミナルで `cd app && npm run dev`（:5173、`/api` を :8787 にプロキシ）。
 
-### MCPJam で widget を確認
+### MCP Jam で widget を確認
 
-1. 上記の HTTP サーバーを起動
-2. `npx @mcpjam/inspector@latest` を実行し、表示 URL を開く（ローカル接続は npx / デスクトップ版のみ）
-3. **Add Server** → HTTP → `http://127.0.0.1:8787/mcp/`（末尾スラッシュ必須）
-4. **Playground / App Builder** で `generate_meeting_brief` を実行（*Tools* ページでは描画されない）
+ブラウザ上で MCP ツールと iframe MCP App を試せる [MCP Jam Inspector](https://github.com/mcpjam/inspector) を使う手順です。
 
-> 2 カラム表示はデバイスを **Desktop** に。実データと **Ask** には `GEMINI_API_KEY` が必要。
+```bash
+# 1. HTTP ブリッジを起動（ターミナル①）
+cd server
+uv run customer-context-mcp http --host 127.0.0.1 --port 8787   # → http://127.0.0.1:8787
+
+# 2. MCP Jam Inspector を起動（ターミナル②）
+npx @mcpjam/inspector@latest                                    # → ブラウザが自動で開く（http://127.0.0.1:6274）
+```
+
+> ローカル接続は npx / デスクトップ版のみ対応（Web 版は不可）。
+
+3. Inspector で **Add Server** → **HTTP** → URL に `http://127.0.0.1:8787/mcp/` を入力（**末尾スラッシュ必須**）
+4. **Playground / App Builder** で `generate_meeting_brief` を実行（*Tools* ページでは widget が描画されない）
+
+**補足**
+
+- 2 カラム表示にするにはデバイスを **Desktop** に設定する。
+- App の UI を編集しながら確認する場合は、別ターミナルで `cd app && npm run dev`（:5173、`/api` を :8787 にプロキシ）。
+- 実データ取得と **Ask** には `GEMINI_API_KEY` が必要。Slack 検索には `xoxb-` のボットトークン（`SLACK_BOT_TOKEN`）が必要で、Bot を対象チャンネルに招待しておく必要があります。
 
 ### MCP stdio サーバー（Claude Desktop / Claude Code）
 
